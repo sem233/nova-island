@@ -1,0 +1,4 @@
+﻿/* Arabic (from Nova Island 1.8.x): right to left */
+html[dir="rtl"] .sw { transform: scaleX(-1); }
+html[dir="rtl"] body { font-family: "Segoe UI", "Segoe UI Variable Text", Tahoma, sans-serif; }
+html.i18n-wait body { visibility: hidden; }

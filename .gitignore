@@ -1,0 +1,9 @@
+node_modules/
+dist/
+tools/
+*.log
+setup-log.txt
+__pycache__/
+promo/src/out/
+promo/src/scenes/_*.html
+promo/src/prefs.html
