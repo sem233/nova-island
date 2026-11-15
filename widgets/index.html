@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>Nova Desktop Widgets</title>
+  <link rel="stylesheet" href="widgets.css">
+</head>
+<body>
+  <!-- Drag Handle Bar for the Desktop Widget Window -->
+  <div class="desktop-drag-bar">
+    <div class="drag-pill">
+      <i class="drag-dot"></i>
+      <span>Nova Widgets</span>
+    </div>
+  </div>
+
+  <div class="desktop-widgets-wrap" id="widgets-wrap" data-size="medium">
+    <!-- WIDGET: Tasbih & Dhikr (المسبحة والأذكار) -->
+    <div class="dw-card tasbih-widget" id="w-tasbih">
+      <div class="tasbih-phrase" id="tasbih-phrase">سبحان الله وبحمده</div>
+      <button type="button" class="tasbih-circle-btn" id="tasbih-circle-btn" title="اضغط للتسبيح">
+        <span class="tasbih-count" id="tasbih-count">0</span>
+        <span class="tasbih-label">تسبيح</span>
+      </button>
+      <div class="tasbih-controls">
+        <button type="button" class="tasbih-mini-btn" id="tasbih-next-btn">الذكر التالي ↺</button>
+        <button type="button" class="tasbih-mini-btn" id="tasbih-reset-btn">تصفير 0</button>
+      </div>
+    </div>
+
+    <!-- WIDGET: Next Prayer (الصلاة القادمة) -->
+    <div class="dw-card next-prayer-widget" id="w-next-prayer">
+      <div class="np-right">
+        <span class="np-title">الصلاة القادمة</span>
+        <span class="np-name" id="np-name">الظهر</span>
+        <span class="np-time" id="np-time">12:58 PM</span>
+      </div>
+      <div class="np-left">
+        <span class="np-countdown" id="np-countdown">00:00:00</span>
+        <span class="np-left-lbl">المتبقي للأذان</span>
+      </div>
+    </div>
+
+    <!-- WIDGET: Five Prayers (الصلوات الخمس) -->
+    <div class="dw-card five-prayers-widget" id="w-five-prayers" hidden>
+      <div class="fp-header">
+        <span class="fp-title">مواقيت الصلوات اليوم</span>
+        <span class="fp-date" id="fp-date">--:--</span>
+      </div>
+      <div class="fp-list" id="fp-list">
+        <!-- Rendered by widgets.js -->
+      </div>
+    </div>
+
+    <!-- WIDGET: Style 1 (Split Clock & Arabic Calligraphy Day) -->
+    <div class="dw-card wstyle-1" id="w-style1">
+      <div class="w1-date" id="w1-date">-- محرم ---- | -- يونيو ----</div>
+      <div class="w1-main">
+        <div class="w1-hour" id="w1-hour">06</div>
+        <div class="w1-day" id="w1-day">الْجُمُعَة</div>
+        <div class="w1-min" id="w1-min">58</div>
+      </div>
+      <div class="w1-prayer" id="w1-prayer">الظهر · 12:58</div>
+    </div>
+
+    <!-- WIDGET: Style 2 (Dual Earth Stacked Glass Cards) -->
+    <div class="dw-card wstyle-2" id="w-style2" hidden>
+      <div class="w2-grid">
+        <div class="w2-subcard w2-left">
+          <div class="w2-v-hour" id="w2-v-hour">06</div>
+          <div class="w2-v-min" id="w2-v-min">58</div>
+          <div class="w2-v-day" id="w2-v-day">الجمعة</div>
+        </div>
+        <div class="w2-subcard w2-right">
+          <span class="w2-pill-badge" id="w2-pill-badge">الْجُمُعَة</span>
+          <div class="w2-day-num" id="w2-day-num">26</div>
+          <div class="w2-month" id="w2-month">يونيو</div>
+          <div class="w2-hijri" id="w2-hijri">11 محرم 1448</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WIDGET: Style 3 (Calligraphy + Glowing Timeline + Digital Clock) -->
+    <div class="dw-card wstyle-3" id="w-style3" hidden>
+      <div class="w3-top">
+        <div class="w3-day" id="w3-day">الْجُمُعَة</div>
+      </div>
+      <div class="w3-line-box">
+        <div class="w3-line">
+          <div class="w3-dot" id="w3-dot"></div>
+        </div>
+      </div>
+      <div class="w3-clock" id="w3-clock">06:58</div>
+      <div class="w3-prayer" id="w3-prayer">الظهر · باقي 0:23</div>
+    </div>
+  </div>
+
+  <script src="widgets.js"></script>
+</body>
+</html>

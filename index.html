@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="themes.css">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="style-quickclips.css">
-  <link rel="stylesheet" href="style-widgets.css">
   <link rel="stylesheet" href="style-tasks.css">
 </head>
 <body>
@@ -214,9 +213,6 @@
             </button>
             <button role="tab" data-tab="downloads" class="tab" aria-label="Downloads" hidden>
               <svg class="s" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>Downloads</span><i class="badge" id="dl-badge"></i>
-            </button>
-            <button role="tab" data-tab="widgets" class="tab" aria-label="Widgets">
-              <svg class="s" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg><span>Widgets</span>
             </button>
             <button role="tab" data-tab="tasks" class="tab" aria-label="Tasks" hidden>
               <svg class="s" viewBox="0 0 24 24"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>Tasks</span><i class="badge" id="tasks-badge"></i>
@@ -549,7 +545,7 @@
               </div>
               <div class="meter-update-row">
                 <div class="update-info">
-                  <span class="update-title"><svg class="s" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19"/></svg><b>Updates</b> <span id="sys-version-tag">v1.7.1</span></span>
+                  <span class="update-title"><svg class="s" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.19"/></svg><b>Updates</b> <span id="sys-version-tag">v1.7.2</span></span>
                   <span id="sys-update-status" class="update-status">Click to check for latest release</span>
                 </div>
                 <button id="sys-update-btn" class="opt-btn" title="Check and install updates from GitHub">
@@ -571,71 +567,6 @@
                 </button>
               </div>
               <div id="clip-list" class="clip-list"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- WIDGETS -->
-        <section id="v-widgets" class="view" role="tabpanel">
-          <div class="widgets-view">
-            <div class="widget-toolbar">
-              <div class="widget-toolbar-group">
-                <span class="wt-label">Style:</span>
-                <button class="wstyle-btn active" data-style="1">Style 1</button>
-                <button class="wstyle-btn" data-style="2">Style 2</button>
-                <button class="wstyle-btn" data-style="3">Style 3</button>
-                <button class="wstyle-btn" data-style="all">All</button>
-              </div>
-              <div class="widget-toolbar-group">
-                <span class="wt-label">Size:</span>
-                <button class="wsize-btn" data-size="small">S</button>
-                <button class="wsize-btn active" data-size="medium">M</button>
-                <button class="wsize-btn" data-size="large">L</button>
-              </div>
-            </div>
-
-            <div class="widgets-container" id="widgets-container" data-size="medium">
-              <!-- Style 1: Split Clock with Calligraphy Day -->
-              <div class="widget-card wstyle-1" id="wcard-1">
-                <div class="w1-date" id="w1-date">-- محرم ---- | -- يونيو ----</div>
-                <div class="w1-main">
-                  <div class="w1-hour" id="w1-hour">06</div>
-                  <div class="w1-day" id="w1-day">الْجُمُعَة</div>
-                  <div class="w1-min" id="w1-min">58</div>
-                </div>
-                <div class="w1-prayer" id="w1-prayer">الظهر · 12:58</div>
-              </div>
-
-              <!-- Style 2: Dual Glass Cards -->
-              <div class="widget-card wstyle-2" id="wcard-2" hidden>
-                <div class="w2-grid">
-                  <div class="w2-subcard w2-left">
-                    <div class="w2-v-hour" id="w2-v-hour">06</div>
-                    <div class="w2-v-min" id="w2-v-min">58</div>
-                    <div class="w2-v-day" id="w2-v-day">الجمعة</div>
-                  </div>
-                  <div class="w2-subcard w2-right">
-                    <span class="w2-pill-badge" id="w2-pill-badge">الْجُمُعَة</span>
-                    <div class="w2-day-num" id="w2-day-num">26</div>
-                    <div class="w2-month" id="w2-month">يونيو</div>
-                    <div class="w2-hijri" id="w2-hijri">11 محرم 1448</div>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Style 3: Calligraphy + Timeline Slider + Clock -->
-              <div class="widget-card wstyle-3" id="wcard-3" hidden>
-                <div class="w3-top">
-                  <div class="w3-day" id="w3-day">الْجُمُعَة</div>
-                </div>
-                <div class="w3-line-box">
-                  <div class="w3-line">
-                    <div class="w3-dot" id="w3-dot"></div>
-                  </div>
-                </div>
-                <div class="w3-clock" id="w3-clock">06:58</div>
-                <div class="w3-prayer" id="w3-prayer">الظهر · باقي 0:23</div>
-              </div>
             </div>
           </div>
         </section>
@@ -733,7 +664,6 @@
   <script src="views/nova.js"></script>
   <script src="views/scene.js"></script>
   <script src="views/water.js"></script>
-  <script src="views/widgets.js"></script>
   <script src="views/tasks.js"></script>
   <script src="views/ready.js"></script>
 </body>

@@ -74,12 +74,34 @@ function checkBundle(bundle) {
 
 function loadInstalled() {
   installed = {};
+
+  // Copy bundled plugins (e.g. tasks.nvp) into userData plugins dir
+  try {
+    const bundledDir = path.join(__dirname, 'bundled-plugins');
+    if (fs.existsSync(bundledDir)) {
+      fs.mkdirSync(dir(), { recursive: true });
+      for (const f of fs.readdirSync(bundledDir)) {
+        if (!f.endsWith('.nvp')) continue;
+        const dest = path.join(dir(), f);
+        if (!fs.existsSync(dest)) {
+          fs.copyFileSync(path.join(bundledDir, f), dest);
+        }
+      }
+    }
+  } catch {}
+
   let names = [];
   try { names = fs.readdirSync(dir()).filter((n) => n.endsWith('.nvp')); } catch {}
   for (const n of names) {
     try {
       const m = checkBundle(JSON.parse(fs.readFileSync(path.join(dir(), n), 'utf8')));
-      if (m && `${m.id}.nvp` === n) installed[m.id] = m;
+      if (m && `${m.id}.nvp` === n) {
+        installed[m.id] = m;
+        if (!state[m.id]) {
+          state[m.id] = { enabled: true, settings: {} };
+          settings.save('plugins.json', state);
+        }
+      }
       else log.info(`[plugins] ${n} failed its check, not loaded`);
     } catch {}
   }

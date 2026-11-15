@@ -27,6 +27,7 @@ const prefsWindow = require('./prefs-window');
 const updater = require('./updater');
 const news = require('./news');
 const plugins = require('./plugins');
+const widgetsWindow = require('./widgets-window');
 
 // Keep our own windows (the mini player) out of Windows' media sessions, so the island and
 // the per-app commands keep targeting the browser tab rather than the mini player.
@@ -1306,6 +1307,7 @@ app.whenReady().then(() => {
     send(ch, data);
     prefsWindow.send(ch, data);
   });
+  widgetsWindow.start(prayer);
   // waking from sleep or getting the internet back: weather, prayer times and a failed update
   // check catch up at once instead of waiting for their next timer (5 s for Wi-Fi to reconnect)
   let wakeTimer = null;

@@ -17,6 +17,27 @@ function load() {
   } catch {
     _tasks = [];
   }
+  if (!_tasks.length) {
+    _tasks = [
+      {
+        id: 't:welcome:1',
+        text: 'مرحباً بك في قائمة المهام (Tasks) على نوفا آيلاند 📝',
+        priority: 'high',
+        due: 'اليوم',
+        done: false,
+        createdAt: Date.now(),
+      },
+      {
+        id: 't:welcome:2',
+        text: 'يمكنك تحديد المهمة كمنجزة بالضغط على المربع أو حذفها أو إضافة مهمة جديدة',
+        priority: 'normal',
+        due: '',
+        done: false,
+        createdAt: Date.now() - 1000,
+      }
+    ];
+    save();
+  }
   return _tasks;
 }
 

@@ -1313,7 +1313,7 @@ setInterval(() => {
 }, 250);
 
 // ---------------- settings ----------------
-const TAB_FEATURE = { media: 'tabMedia', apps: 'tabApps', shelf: 'tabShelf', quickclips: 'tabClips', widgets: 'tabWidgets', prayer: 'tabPrayer', timer: 'tabTimer', system: 'tabSystem' };
+const TAB_FEATURE = { media: 'tabMedia', apps: 'tabApps', shelf: 'tabShelf', quickclips: 'tabClips', prayer: 'tabPrayer', timer: 'tabTimer', system: 'tabSystem' };
 
 // Hide tabs that are switched off (Downloads shows itself only around download activity).
 function refreshTabs() {
