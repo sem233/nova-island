@@ -167,6 +167,18 @@ static class Win {
   [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr ctx);
   public static void PerMonitorDpi() { try { SetProcessDpiAwarenessContext(new IntPtr(-4)); } catch { } }
 
+  [DllImport("psapi.dll")] static extern int EmptyWorkingSet(IntPtr h);
+  public static void TrimWorkingSets() {
+    try {
+      foreach (var proc in System.Diagnostics.Process.GetProcessesByName("Nova Island")) {
+        try { EmptyWorkingSet(proc.Handle); } catch { }
+      }
+    } catch { }
+    try {
+      EmptyWorkingSet(System.Diagnostics.Process.GetCurrentProcess().Handle);
+    } catch { }
+  }
+
   public static void Foreground(out string proc, out string title) {
     proc = ""; title = "";
     IntPtr h = GetForegroundWindow();
@@ -312,6 +324,7 @@ static class Program {
       return;
     }
     if (cmd == "mute") { try { Audio.SetMute(!Audio.GetMute()); } catch { } return; }
+    if (cmd == "trim") { Win.TrimWorkingSets(); return; }
     if ((m = Bright.Match(cmd)).Success) {
       bright = Math.Min(100, int.Parse(m.Groups[1].Value));
       Brightness.Set(bright);

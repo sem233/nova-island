@@ -29,7 +29,6 @@
       </label>
       <a href="#general" data-page="general"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>General</a>
       <a href="#island" data-page="island"><svg viewBox="0 0 24 24"><rect x="2" y="8" width="20" height="8" rx="4"/></svg>Island</a>
-      <a href="#widgets-page" data-page="widgets-page"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Widgets</a>
       <a href="#themes-page" data-page="themes-page"><svg viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4.5 4H15a2 2 0 0 0-1.5 3.3A1.6 1.6 0 0 1 12 22Z"/><circle cx="7.5" cy="10.5" r="1.2"/><circle cx="12" cy="7" r="1.2"/><circle cx="16.5" cy="10.5" r="1.2"/></svg>Themes</a>
       <a href="#companion" data-page="companion"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg>Companion</a>
       <a href="#faith" data-page="faith"><svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>Prayer &amp; Dhikr</a>
@@ -149,43 +148,6 @@
             <label class="row"><b>Show media</b><input type="checkbox" class="sw" data-feature="mediaPill"></label>
             <label class="row sub" data-needs="mediaPill"><b>Title</b><input type="checkbox" class="sw" data-feature="mediaTitle"></label>
             <label class="row"><b>New track card</b><input type="checkbox" class="sw" data-feature="trackPeek"></label>
-          </div>
-        </div>
-      </section>
-
-      <!-- WIDGETS -->
-      <section id="widgets-page" class="page">
-        <h1>Desktop Widgets</h1>
-        <p class="lead">Glass cards on your desktop. Drag them anywhere on your screen.</p>
-        <div class="group">
-          <div class="card">
-            <label class="row"><b>Show widgets on the desktop</b><input type="checkbox" class="sw" data-feature="desktopWidgets"></label>
-            <div class="row"><b>Size</b>
-              <div class="seg" role="radiogroup" aria-label="Widget size" id="wsize-seg">
-                <button role="radio" data-wsize="small">Small</button>
-                <button role="radio" data-wsize="medium">Medium</button>
-                <button role="radio" data-wsize="large">Large</button>
-              </div>
-            </div>
-            <div class="row"><b>Position</b><button class="btn" id="widgets-reset-btn">Reset places</button></div>
-          </div>
-        </div>
-
-        <div class="group">
-          <h2>Prayer &amp; Dhikr (الصلاة والتسبيح)</h2>
-          <div class="card">
-            <label class="row"><div class="txt"><b>Next prayer</b><small>Countdown and time of the upcoming prayer</small></div><input type="checkbox" class="sw" data-feature="widgetNextPrayer"></label>
-            <label class="row"><div class="txt"><b>Five prayers</b><small>Times of all 5 daily prayers</small></div><input type="checkbox" class="sw" data-feature="widgetFivePrayers"></label>
-            <label class="row"><div class="txt"><b>Dhikr &amp; Tasbih (التسبيح والأذكار)</b><small>Interactive digital tasbih counter on desktop</small></div><input type="checkbox" class="sw" data-feature="widgetTasbih"></label>
-          </div>
-        </div>
-
-        <div class="group">
-          <h2>Screen Styles (أشكال ويدجتس شاشة القفل)</h2>
-          <div class="card">
-            <label class="row"><div class="txt"><b>Style 1: Split Clock &amp; Calligraphy</b><small>Bold numbers with calligraphy day and prayer time</small></div><input type="checkbox" class="sw" data-feature="widgetStyle1"></label>
-            <label class="row"><div class="txt"><b>Style 2: Dual Glass Cards</b><small>Stacked vertical clock and calendar badge card</small></div><input type="checkbox" class="sw" data-feature="widgetStyle2"></label>
-            <label class="row"><div class="txt"><b>Style 3: Glowing Timeline &amp; Clock</b><small>Timeline progress dot, digital clock and countdown</small></div><input type="checkbox" class="sw" data-feature="widgetStyle3"></label>
           </div>
         </div>
       </section>

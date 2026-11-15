@@ -27,16 +27,16 @@ const prefsWindow = require('./prefs-window');
 const updater = require('./updater');
 const news = require('./news');
 const plugins = require('./plugins');
-const widgetsWindow = require('./widgets-window');
 
 // Keep our own windows (the mini player) out of Windows' media sessions, so the island and
 // the per-app commands keep targeting the browser tab rather than the mini player.
-app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess');
-// RAM optimizations: constrain V8 old space, expose GC for idle trims, disable crash/domain telemetry overhead
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --expose-gc');
+app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,CalculateNativeWinOcclusion,SpareRendererForSitePerProcess,AudioServiceOutOfProcess');
+// Ultra-low RAM optimizations: limit V8 heap, expose GC, remove telemetry, enable background throttling
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=64 --expose-gc');
 app.commandLine.appendSwitch('disable-breakpad');
 app.commandLine.appendSwitch('disable-domain-reliability');
 app.commandLine.appendSwitch('disable-component-update');
+app.commandLine.appendSwitch('disable-gpu-memory-buffer-video-frames');
 
 const WIN_W = 640;
 const WIN_H = 320;
@@ -573,8 +573,6 @@ ipcMain.handle('mini-open', async (_e, req) => {
 const mdm = require('./mdm');
 const clips = require('./clips');
 clips.init(() => send('clips', clips.list()));
-const tasks = require('./tasks');
-tasks.init(() => send('tasks-update', tasks.list()));
 let videoDlBusy = false;
 
 async function resolveBrowserUrl(proc, title) {
@@ -932,7 +930,10 @@ ipcMain.on('shelf-drag', (e, p) => shelf.startDrag(e.sender, p));
 
 // --- system ---
 ipcMain.handle('system-snapshot', () => system.snapshot());
-ipcMain.handle('system-optimize', () => system.optimize());
+ipcMain.handle('system-optimize', async () => {
+  mediaWrite('trim');
+  return system.optimize();
+});
 ipcMain.on('clip-copy', (_e, i) => system.copyClip(i));
 ipcMain.on('clip-clear', () => system.clearClips());
 ipcMain.handle('prayer-snapshot', () => prayer.snapshot());
@@ -1311,11 +1312,13 @@ app.whenReady().then(() => {
     send(ch, data);
     prefsWindow.send(ch, data);
   });
-  try {
-    widgetsWindow.start(prayer);
-  } catch (err) {
-    console.error('[widgets-window] start failed:', err);
-  }
+  // Periodic idle memory trim to keep RAM usage minimal
+  setInterval(() => {
+    if (global.gc) {
+      try { global.gc(); } catch {}
+    }
+    mediaWrite('trim');
+  }, 2 * 60 * 1000);
   // waking from sleep or getting the internet back: weather, prayer times and a failed update
   // check catch up at once instead of waiting for their next timer (5 s for Wi-Fi to reconnect)
   let wakeTimer = null;

@@ -120,13 +120,4 @@ contextBridge.exposeInMainWorld('nova', {
     copy:             (id)         => ipcRenderer.send('clips-copy', id),
     onUpdate:         on('clips'),
   },
-
-  tasks: {
-    list:     ()           => ipcRenderer.invoke('tasks-list'),
-    add:      (text, opts) => ipcRenderer.invoke('tasks-add', text, opts),
-    toggle:   (id, done)   => ipcRenderer.invoke('tasks-toggle', id, done),
-    remove:   (id)         => ipcRenderer.invoke('tasks-remove', id),
-    clear:    (compOnly)   => ipcRenderer.invoke('tasks-clear', compOnly),
-    onUpdate: on('tasks-update'),
-  },
 });

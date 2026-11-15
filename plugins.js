@@ -43,10 +43,7 @@ function checkRadio(m) {
   }
   return { stations };
 }
-function checkTasks(m) {
-  return { tasks: Array.isArray(m.tasks) ? m.tasks : [] };
-}
-const KINDS = { radio: checkRadio, tasks: checkTasks };
+const KINDS = { radio: checkRadio };
 
 function checkSettings(list) {
   const out = [];
@@ -74,21 +71,6 @@ function checkBundle(bundle) {
 
 function loadInstalled() {
   installed = {};
-
-  // Copy bundled plugins (e.g. tasks.nvp) into userData plugins dir
-  try {
-    const bundledDir = path.join(__dirname, 'bundled-plugins');
-    if (fs.existsSync(bundledDir)) {
-      fs.mkdirSync(dir(), { recursive: true });
-      for (const f of fs.readdirSync(bundledDir)) {
-        if (!f.endsWith('.nvp')) continue;
-        const dest = path.join(dir(), f);
-        if (!fs.existsSync(dest)) {
-          fs.copyFileSync(path.join(bundledDir, f), dest);
-        }
-      }
-    }
-  } catch {}
 
   let names = [];
   try { names = fs.readdirSync(dir()).filter((n) => n.endsWith('.nvp')); } catch {}
@@ -119,7 +101,7 @@ function values(m) {
 function active() {
   return Object.values(installed)
     .filter((m) => state[m.id]?.enabled !== false)
-    .map((m) => ({ id: m.id, kind: m.kind, name: m.name, description: m.description, stations: m.stations, tasks: m.tasks, values: values(m) }));
+    .map((m) => ({ id: m.id, kind: m.kind, name: m.name, description: m.description, stations: m.stations, values: values(m) }));
 }
 
 const newer = (a, b) => {

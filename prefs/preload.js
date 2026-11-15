@@ -26,7 +26,6 @@ contextBridge.exposeInMainWorld('prefs', {
   downloadFolders: () => ipcRenderer.invoke('dl-folders'),
   addDownloadFolder: () => ipcRenderer.invoke('dl-folder-add'),
   removeDownloadFolder: (p) => ipcRenderer.invoke('dl-folder-remove', p),
-  resetWidgetsPos: () => ipcRenderer.send('widgets-reset-pos'),
   plugins: () => ipcRenderer.invoke('plugins-list'),
   onPlugins: on('plugins-list'),
   onPluginProgress: on('plugin-progress'),

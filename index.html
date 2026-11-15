@@ -7,7 +7,6 @@
   <link rel="stylesheet" href="themes.css">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="style-quickclips.css">
-  <link rel="stylesheet" href="style-tasks.css">
 </head>
 <body>
   <div id="island" class="idle" role="region" aria-label="Dynamic Island">
@@ -213,9 +212,6 @@
             </button>
             <button role="tab" data-tab="downloads" class="tab" aria-label="Downloads" hidden>
               <svg class="s" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span>Downloads</span><i class="badge" id="dl-badge"></i>
-            </button>
-            <button role="tab" data-tab="tasks" class="tab" aria-label="Tasks" hidden>
-              <svg class="s" viewBox="0 0 24 24"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg><span>Tasks</span><i class="badge" id="tasks-badge"></i>
             </button>
             <button role="tab" data-tab="prayer" class="tab" aria-label="Prayer times">
               <svg class="s" viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg><span>Prayer</span>
@@ -570,32 +566,6 @@
             </div>
           </div>
         </section>
-
-        <!-- TASKS (Plugin) -->
-        <section id="v-tasks" class="view" role="tabpanel">
-          <div class="tasks-view">
-            <div class="tasks-toolbar">
-              <form id="task-add-form" class="task-add-form">
-                <input type="text" id="task-input" class="task-input" placeholder="Add a new task…" autocomplete="off" maxlength="250">
-                <select id="task-priority" class="task-select" title="Priority">
-                  <option value="urgent">Urgent</option>
-                  <option value="high">High</option>
-                  <option value="normal" selected>Normal</option>
-                  <option value="low">Low</option>
-                </select>
-                <button type="submit" class="task-add-btn pill small primary">Add</button>
-              </form>
-              <button id="task-clear-btn" class="task-clear-btn" title="Clear completed tasks">
-                <svg class="s" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
-              </button>
-            </div>
-            <div id="tasks-list" class="tasks-list"></div>
-            <div id="tasks-empty" class="tasks-empty">
-              <svg class="s" viewBox="0 0 24 24"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-              <span>No tasks yet. Enjoy your day!</span>
-            </div>
-          </div>
-        </section>
       </div>
     </div>
   
@@ -665,7 +635,6 @@
   <script src="views/nova.js"></script>
   <script src="views/scene.js"></script>
   <script src="views/water.js"></script>
-  <script src="views/tasks.js"></script>
   <script src="views/ready.js"></script>
 </body>
 </html>
