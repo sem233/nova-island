@@ -1,7 +1,7 @@
 // Updates View: checks GitHub releases (sem233/nova-island), streams download,
-// shows live progress, and restarts into the new version.
+// shows live progress, and restarts reliably into the new version.
 (() => {
-  const COUNTDOWN_S = 6;
+  const COUNTDOWN_S = 3;
   let timer = null;
   let checking = false;
 
@@ -17,24 +17,29 @@
     checking = on;
     if (headerBtn) headerBtn.classList.toggle('spinning', on);
     if (sysBtn) sysBtn.classList.toggle('spinning', on);
-    if (sysStatus && on) sysStatus.textContent = 'Checking for updates on GitHub… (جاري البحث)';
+    if (on) {
+      if (sysStatus) sysStatus.textContent = 'Checking for updates on GitHub… (جاري فحص التحديثات)';
+      showToast('spin', 'فحص التحديثات من GitHub…', 'Checking…', 0, 10000);
+    }
   }
 
   function startCountdown(version) {
     if (timer) return;
     let left = COUNTDOWN_S;
     const show = () => {
-      showToast('updating', `Updating to ${version} · Restarting`, `${left}s`, 0, left * 1000 + 800);
-      state.toastAction = show;
+      showToast('updating', `التحديث ${version} جاهز`, `إعادة التشغيل خلال ${left}s (انقر هنا الآن)`, 1, left * 1000 + 800);
+      state.toastAction = () => {
+        if (timer) { clearInterval(timer); timer = null; }
+        bridge.installUpdate();
+      };
     };
     show();
-    if (sysStatus) sysStatus.textContent = `Update ready! Restarting in ${left}s…`;
+    if (sysStatus) sysStatus.textContent = `Update ${version} ready! Restarting in ${left}s… (انقر للتثبيت الآن)`;
 
     timer = setInterval(() => {
       left -= 1;
       if (left > 0) {
-        $('#t-value').textContent = `${left}s`;
-        $('#vt-value').textContent = `${left}s`;
+        show();
         if (sysStatus) sysStatus.textContent = `Update ready! Restarting in ${left}s…`;
         return;
       }
@@ -60,15 +65,19 @@
       }
 
       if (!res.available) {
-        if (sysStatus) sysStatus.textContent = `Nova Island is up to date (${res.currentVersion || res.version})`;
-        showToast('check', 'التطبيق على أحدث إصدار', res.version, 1, 3500);
+        const curVer = res.currentVersion || res.version || '';
+        if (sysStatus) sysStatus.textContent = `Nova Island is up to date (${curVer})`;
+        showToast('check', 'التطبيق على أحدث إصدار', curVer, 1, 4000);
+        if (updateDot) updateDot.hidden = true;
         return;
       }
 
       // Update available!
       if (updateDot) updateDot.hidden = false;
-      if (sysStatus) sysStatus.textContent = `Found ${res.version} (${res.sizeMb} MB). Downloading…`;
-      showToast('dl-start', `تحديث جديد ${res.version}`, `حجم ${res.sizeMb} MB · جاري التحميل`, 0, 4000);
+      const verText = res.version || '';
+      const sizeText = res.sizeMb ? `${res.sizeMb} MB` : '';
+      if (sysStatus) sysStatus.textContent = `Found ${verText} (${sizeText}). Downloading…`;
+      showToast('dl', `تحديث متوفر ${verText}`, `${sizeText} · بدء التحميل`, 0, 5000);
 
       if (progWrap) progWrap.hidden = false;
       if (progBar) progBar.style.width = '0%';
@@ -90,7 +99,7 @@
     } catch (err) {
       setChecking(false);
       if (sysStatus) sysStatus.textContent = `Error: ${err.message}`;
-      showToast('err', 'خطأ في التحديث', err.message, 0, 4000);
+      showToast('err', 'خطأ في التحديث', err.message, 0, 4500);
     }
   }
 
@@ -102,6 +111,15 @@
       if (progBar) progBar.style.width = `${pct}%`;
       if (progLbl) progLbl.textContent = `${pct}% (${p.receivedMb}/${p.totalMb} MB)`;
       if (sysStatus) sysStatus.textContent = `Downloading update: ${pct}% (${p.receivedMb}/${p.totalMb} MB)`;
+
+      // Keep Toast updated live on the Island so progress is always visible
+      showToast(
+        'updating',
+        `تحميل التحديث ${p.version || ''}`,
+        `${pct}% (${p.receivedMb}/${p.totalMb} MB)`,
+        pct / 100,
+        15000
+      );
     });
   }
 
@@ -109,7 +127,7 @@
   bridge.onUpdate((u) => {
     if (timer) return;
     if (updateDot) updateDot.hidden = false;
-    showToast('update', `Update ready · ${u.version}`, 'Restart now', 0, 20000);
+    showToast('update', `Update ready · ${u.version}`, 'Restart now (إعادة التشغيل)', 0, 25000);
     state.toastAction = () => startCountdown(u.version);
   });
 

@@ -1301,7 +1301,10 @@ app.whenReady().then(() => {
   downloads.start(send, features.get().downloads, features.get().folderDownloads);
   privacy.start(send, features.get().privacyDots);
   network.start(send, features.get().netToasts);
-  updater.start(send, autoUpdate);
+  updater.start((ch, data) => {
+    send(ch, data);
+    prefsWindow.send(ch, data);
+  }, autoUpdate);
   news.start(send, features.get().news);
   plugins.start((ch, data) => {
     send(ch, data);

@@ -175,6 +175,92 @@ $$('[data-general-action]').forEach((b) => b.addEventListener('click', () => {
   saved('Done');
 }));
 
+// ---- manual updates ----
+const updateCheckBtn = $('#prefs-check-update-btn');
+const updateStatusTxt = $('#prefs-update-status');
+const updateProgWrap = $('#prefs-update-prog');
+const updateBar = $('#prefs-update-bar');
+const updateLbl = $('#prefs-update-lbl');
+const updateBytes = $('#prefs-update-bytes');
+
+let updateReadyVersion = null;
+
+if (updateCheckBtn && api.updater) {
+  updateCheckBtn.addEventListener('click', async () => {
+    if (updateReadyVersion) {
+      updateStatusTxt.textContent = 'Restarting to install update… (إعادة التشغيل والتثبيت)';
+      api.updater.install();
+      return;
+    }
+
+    updateCheckBtn.disabled = true;
+    updateCheckBtn.textContent = 'Checking…';
+    updateStatusTxt.textContent = 'Checking for updates on GitHub… (جاري البحث عن تحديثات)';
+
+    try {
+      const res = await api.updater.check(true);
+      if (!res.ok) {
+        updateStatusTxt.textContent = `Check failed: ${res.error || 'Error'}`;
+        updateCheckBtn.disabled = false;
+        updateCheckBtn.textContent = 'Check';
+        return;
+      }
+
+      if (!res.available) {
+        updateStatusTxt.textContent = `Nova Island is up to date (${res.currentVersion || res.version})`;
+        updateCheckBtn.disabled = false;
+        updateCheckBtn.textContent = 'Check';
+        return;
+      }
+
+      // Update available!
+      updateStatusTxt.textContent = `Found ${res.version} (${res.sizeMb} MB). Downloading…`;
+      updateCheckBtn.textContent = 'Downloading…';
+      if (updateProgWrap) updateProgWrap.hidden = false;
+      if (updateBar) updateBar.style.width = '0%';
+
+      const dlRes = await api.updater.download();
+      if (!dlRes.ok) {
+        updateStatusTxt.textContent = `Download failed: ${dlRes.error || 'Error'}`;
+        updateCheckBtn.disabled = false;
+        updateCheckBtn.textContent = 'Retry';
+        if (updateProgWrap) updateProgWrap.hidden = true;
+        return;
+      }
+
+      updateReadyVersion = dlRes.version;
+      updateStatusTxt.textContent = `Update ${dlRes.version} downloaded! Ready to install.`;
+      updateCheckBtn.disabled = false;
+      updateCheckBtn.textContent = 'Restart now (تثبيت)';
+      if (updateProgWrap) updateProgWrap.hidden = true;
+    } catch (err) {
+      updateStatusTxt.textContent = `Error: ${err.message}`;
+      updateCheckBtn.disabled = false;
+      updateCheckBtn.textContent = 'Check';
+    }
+  });
+
+  if (api.updater.onProgress) {
+    api.updater.onProgress((p) => {
+      const pct = p.pct || 0;
+      if (updateProgWrap) updateProgWrap.hidden = false;
+      if (updateBar) updateBar.style.width = `${pct}%`;
+      if (updateLbl) updateLbl.textContent = `Downloading ${p.version || ''}... ${pct}%`;
+      if (updateBytes) updateBytes.textContent = `${p.receivedMb} / ${p.totalMb} MB`;
+    });
+  }
+
+  if (api.updater.onReady) {
+    api.updater.onReady((u) => {
+      updateReadyVersion = u.version;
+      updateStatusTxt.textContent = `Update ${u.version} ready! Click Restart to apply.`;
+      updateCheckBtn.disabled = false;
+      updateCheckBtn.textContent = 'Restart now (تثبيت)';
+      if (updateProgWrap) updateProgWrap.hidden = true;
+    });
+  }
+}
+
 // ---- location ----
 function showLocation(info) {
   const manual = info?.mode === 'manual';

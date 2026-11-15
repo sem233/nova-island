@@ -1438,4 +1438,37 @@ body.no-blur:not(.th-solid) .tint, body.no-blur:not(.th-solid) #island.expanded 
   text-align: right;
 }
 
+/* ============ Update Toasts ============ */
+.l-toast.updating .t-bar, .l-toast.dl .t-bar {
+  display: block;
+  flex: 0 0 150px;
+}
+.l-toast.updating .batt, .l-toast.dl .batt, .l-toast.spin .batt, .l-toast.check .batt {
+  display: none;
+}
+.l-toast.updating #t-label, .l-toast.dl #t-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+}
+.l-toast.updating .t-bar b, .l-toast.dl .t-bar b {
+  background: linear-gradient(90deg, #38bdf8, #00e676);
+}
+.l-toast.updating #t-value, .l-toast.dl #t-value {
+  font-size: 11px;
+  color: #38bdf8;
+  min-width: 80px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.l-toast.check #t-value {
+  color: #00e676;
+}
+.l-toast.spin #t-value {
+  color: #38bdf8;
+}
+
+
 

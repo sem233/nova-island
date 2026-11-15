@@ -35,5 +35,13 @@ contextBridge.exposeInMainWorld('prefs', {
   removePlugin: (id) => ipcRenderer.send('plugin-remove', id),
   enablePlugin: (id, on) => ipcRenderer.send('plugin-enable', id, on),
   pluginSet: (id, key, value) => ipcRenderer.send('plugin-setting', id, key, value),
+  updater: {
+    check: (force) => ipcRenderer.invoke('updater-check', force),
+    download: () => ipcRenderer.invoke('updater-download'),
+    install: () => ipcRenderer.send('updater-install'),
+    onProgress: on('update-progress'),
+    onReady: on('update-ready'),
+    onStatus: on('update-status'),
+  },
   onShowPage: on('show-page'),
 });

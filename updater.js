@@ -30,12 +30,13 @@ let timer = null;
 let send = () => {};
 
 function semverCmp(a, b) {
-  const pa = (a || '').replace(/^v/, '').split('.').map(Number);
-  const pb = (b || '').replace(/^v/, '').split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
+  const pa = (a || '').replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  const pb = (b || '').replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length, 3); i++) {
     const na = pa[i] || 0;
     const nb = pb[i] || 0;
-    if (na !== nb) return na > nb ? 1 : -1;
+    if (na > nb) return 1;
+    if (na < nb) return -1;
   }
   return 0;
 }
@@ -63,8 +64,8 @@ async function checkManual(force = false) {
 
     const remoteAssetTime = new Date(asset.updated_at || asset.created_at).getTime();
     const isHigherVersion = semverCmp(tag, currentVersion) > 0;
-    const isNewerBuild = remoteAssetTime > (BUILD_TIME + 60000);
-    const available = force || isHigherVersion || isNewerBuild;
+    const isNewerBuild = semverCmp(tag, currentVersion) === 0 && (remoteAssetTime > (BUILD_TIME + 60000));
+    const available = isHigherVersion || isNewerBuild;
 
     latestReleaseInfo = { release, asset };
 
@@ -129,6 +130,7 @@ async function download() {
         lastProgressPct = pct;
         send('update-progress', {
           pct,
+          version,
           receivedMb: (receivedBytes / (1024 * 1024)).toFixed(1),
           totalMb: (totalBytes / (1024 * 1024)).toFixed(1),
         });
@@ -159,44 +161,101 @@ function install() {
     return false;
   }
 
-  const downloadedPath = ready.path;
+  const downloadedPath = path.resolve(ready.path);
   const currentPid = process.pid;
 
   // Portable exe location or current executable
-  const targetExe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  const targetExe = path.resolve(process.env.PORTABLE_EXECUTABLE_FILE || process.execPath);
+  const targetDir = path.dirname(targetExe);
+  const userDataDir = app?.getPath ? app.getPath('userData') : path.join(process.env.APPDATA || '', 'dynamic-nova');
+  const updatesDir = path.join(userDataDir, 'updates');
+  fs.mkdirSync(updatesDir, { recursive: true });
+
+  const psScriptPath = path.join(updatesDir, 'apply-update.ps1');
+
   log.info(`installing update ${ready.version}: replacing ${targetExe} with ${downloadedPath}`);
 
-  // Create detached powershell worker to replace and launch
+  // Create robust powershell worker script
   const psScript = `
-    $currentPid = ${currentPid};
-    $downloaded = '${downloadedPath.replace(/'/g, "''")}';
-    $target = '${targetExe.replace(/'/g, "''")}';
+# Nova Island Update Installer Script
+$ErrorActionPreference = 'SilentlyContinue'
 
-    # Wait for the running instance to quit
-    $proc = Get-Process -Id $currentPid -ErrorAction SilentlyContinue;
-    if ($proc) { $proc.WaitForExit(10000); }
-    Start-Sleep -Milliseconds 900;
+$electronPid = ${currentPid}
+$downloaded = '${downloadedPath.replace(/'/g, "''")}'
+$target = '${targetExe.replace(/'/g, "''")}'
+$targetDir = '${targetDir.replace(/'/g, "''")}'
 
-    # Copy new binary over target
-    if ($downloaded -ne $target) {
-      try {
-        Copy-Item -Path $downloaded -Destination $target -Force;
-      } catch {
-        Start-Sleep -Seconds 1;
-        Copy-Item -Path $downloaded -Destination $target -Force;
-      }
-    }
+# 1. Wait for the Electron child process to exit
+$proc = Get-Process -Id $electronPid -ErrorAction SilentlyContinue
+if ($proc) {
+  $proc.WaitForExit(15000)
+}
 
-    # Start the updated app
-    Start-Process -FilePath $target;
-  `;
+# 2. Wait until NSIS wrapper and all processes holding the target file have exited
+# and we can open the target file with exclusive write access
+$targetUnlocked = $false
+for ($i = 0; $i -lt 50; $i++) {
+  Start-Sleep -Milliseconds 400
+  $locking = Get-Process | Where-Object {
+    try { $_.Path -eq $target -or $_.Id -eq $electronPid } catch { $false }
+  }
+  if ($locking) { continue }
 
   try {
+    if (Test-Path -LiteralPath $target) {
+      $stream = [System.IO.File]::Open($target, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+      $stream.Close()
+      $stream.Dispose()
+    }
+    $targetUnlocked = $true
+    break
+  } catch {
+    # Still locked by quitting process or antivirus
+  }
+}
+
+# Additional short pause to allow Windows kernel to release single-instance mutexes
+Start-Sleep -Milliseconds 600
+
+# 3. Replace the executable with the newly downloaded binary
+$replaced = $false
+if ($downloaded -ne $target) {
+  for ($i = 0; $i -lt 15; $i++) {
+    try {
+      Copy-Item -LiteralPath $downloaded -Destination $target -Force -ErrorAction Stop
+      $replaced = $true
+      break
+    } catch {
+      Start-Sleep -Milliseconds 500
+    }
+  }
+} else {
+  $replaced = $true
+}
+
+# 4. Launch the updated application
+if ($replaced -and (Test-Path -LiteralPath $target)) {
+  Start-Process -FilePath $target -WorkingDirectory $targetDir
+} else {
+  # Fallback: Copy to "Nova Island.exe" in target folder or run downloaded directly
+  $fallbackPath = Join-Path $targetDir "Nova Island.exe"
+  try {
+    Copy-Item -LiteralPath $downloaded -Destination $fallbackPath -Force -ErrorAction Stop
+    Start-Process -FilePath $fallbackPath -WorkingDirectory $targetDir
+  } catch {
+    Start-Process -FilePath $downloaded -WorkingDirectory (Split-Path -Parent $downloaded)
+  }
+}
+`;
+
+  try {
+    fs.writeFileSync(psScriptPath, psScript, 'utf8');
+
     const child = spawn('powershell.exe', [
       '-NoProfile',
-      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
       '-WindowStyle', 'Hidden',
-      '-Command', psScript,
+      '-File', psScriptPath,
     ], {
       detached: true,
       stdio: 'ignore',
@@ -204,8 +263,17 @@ function install() {
     child.unref();
 
     setTimeout(() => {
-      app.quit();
-    }, 200);
+      try {
+        const { BrowserWindow } = require('electron');
+        for (const w of BrowserWindow.getAllWindows()) {
+          try {
+            w.removeAllListeners('close');
+            w.destroy();
+          } catch {}
+        }
+      } catch {}
+      app.exit(0);
+    }, 250);
     return true;
   } catch (err) {
     log.info(`failed to launch installer: ${err.message}`);
