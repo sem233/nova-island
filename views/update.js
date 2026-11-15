@@ -45,6 +45,8 @@
       }
       clearInterval(timer);
       timer = null;
+      if (sysStatus) sysStatus.textContent = 'Applying update and restarting… (جاري التثبيت وإعادة التشغيل)';
+      showToast('updating', 'جاري التثبيت...', 'إعادة التشغيل في لحظات', 1, 4000);
       bridge.installUpdate();
     }, 1000);
   }

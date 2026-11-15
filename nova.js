@@ -1307,6 +1307,12 @@ app.whenReady().then(() => {
     send(ch, data);
     prefsWindow.send(ch, data);
   }, autoUpdate);
+  updater.setCleanup(() => {
+    quitting = true;
+    if (media) {
+      try { media.kill(); } catch {}
+    }
+  });
   news.start(send, features.get().news);
   plugins.start((ch, data) => {
     send(ch, data);

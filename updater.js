@@ -28,6 +28,7 @@ let latestReleaseInfo = null; // { release, asset }
 let downloading = false;
 let timer = null;
 let send = () => {};
+let cleanupFn = null;
 
 function semverCmp(a, b) {
   const pa = (a || '').replace(/^v/, '').split('.').map(n => parseInt(n, 10) || 0);
@@ -142,6 +143,11 @@ async function download() {
       outStream.end((err) => (err ? reject(err) : resolve()));
     });
 
+    try {
+      const { exec } = require('child_process');
+      exec(`powershell.exe -NoProfile -Command "Unblock-File -LiteralPath '${destPath}' -ErrorAction SilentlyContinue"`);
+    } catch {}
+
     ready = { version, path: destPath };
     downloading = false;
 
@@ -156,6 +162,10 @@ async function download() {
   }
 }
 
+function setCleanup(fn) {
+  cleanupFn = fn;
+}
+
 function install() {
   if (!ready || !ready.path) {
     log.info('install called but no update is ready');
@@ -164,6 +174,7 @@ function install() {
 
   const downloadedPath = path.resolve(ready.path);
   const currentPid = process.pid;
+  const parentPid = process.ppid || '';
 
   // Portable exe location or current executable
   const targetExe = path.resolve(process.env.PORTABLE_EXECUTABLE_FILE || process.execPath);
@@ -177,64 +188,97 @@ function install() {
 
   log.info(`installing update ${ready.version}: replacing ${targetExe} with ${downloadedPath}`);
 
-  const cmdScript = `@echo off
-set LOG="${logPath}"
-echo [%date% %time%] Updater starting for PID %1 > "%LOG%"
-set PID=%1
-set DOWNLOADED=%~2
-set TARGET=%~3
-set TARGETDIR=%~dp3
+  // Call cleanup hook to terminate background helper
+  if (typeof cleanupFn === 'function') {
+    try { cleanupFn(); } catch {}
+  }
 
+  const newVer = ready.version || 'latest';
+  const cmdScript = `@echo off
+chcp 65001 >nul
+set "LOG=${logPath}"
+set "DOWNLOADED=${downloadedPath}"
+set "TARGET=${targetExe}"
+set "TARGETDIR=${targetDir}"
+set "ELECTRON_PID=${currentPid}"
+set "PARENT_PID=${parentPid}"
+set "NEW_VERSION=${newVer}"
+
+echo ======================================== > "%LOG%"
+echo [%date% %time%] Nova Island Updater starting >> "%LOG%"
 echo [%date% %time%] Target: %TARGET% >> "%LOG%"
 echo [%date% %time%] Downloaded: %DOWNLOADED% >> "%LOG%"
-echo [%date% %time%] Waiting for PID %PID% to terminate... >> "%LOG%"
+echo [%date% %time%] Electron PID: %ELECTRON_PID% >> "%LOG%"
+echo [%date% %time%] Parent PID: %PARENT_PID% >> "%LOG%"
 
-:WAIT_PID
-timeout /t 1 /nobreak >nul
-tasklist /fi "pid eq %PID%" 2>nul | find "%PID%" >nul
-if not errorlevel 1 goto WAIT_PID
+:: 1. Force terminate old Electron and NSIS processes
+echo [%date% %time%] Terminating old processes... >> "%LOG%"
+if not "%ELECTRON_PID%"=="" (
+  taskkill /F /PID %ELECTRON_PID% /T >> "%LOG%" 2>&1
+)
+if not "%PARENT_PID%"=="" (
+  taskkill /F /PID %PARENT_PID% /T >> "%LOG%" 2>&1
+)
+taskkill /F /IM nova-helper.exe >> "%LOG%" 2>&1
 
-echo [%date% %time%] PID %PID% terminated. Waiting 2s for handle release... >> "%LOG%"
+:: 2. Wait for file handles to release
+echo [%date% %time%] Waiting for file handles to release... >> "%LOG%"
 timeout /t 2 /nobreak >nul
 
+:: 3. Clear Chromium SingletonLock to avoid phantom single-instance lock failure
+echo [%date% %time%] Clearing SingletonLock... >> "%LOG%"
+del /f /q "%APPDATA%\\dynamic-nova\\SingletonLock" >> "%LOG%" 2>&1
+del /f /q "%APPDATA%\\dynamic-nova\\SingletonCookie" >> "%LOG%" 2>&1
+del /f /q "%APPDATA%\\dynamic-nova\\SingletonSocket" >> "%LOG%" 2>&1
+
+:: 4. Unblock the downloaded file to prevent Windows SmartScreen blocks
+echo [%date% %time%] Unblocking downloaded binary... >> "%LOG%"
+powershell.exe -NoProfile -Command "Unblock-File -LiteralPath '%DOWNLOADED%' -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
+
+:: 5. Copy new binary to target with retries
+echo [%date% %time%] Replacing target executable... >> "%LOG%"
 set RETRY=0
 :RETRY_COPY
 set /a RETRY+=1
 copy /y "%DOWNLOADED%" "%TARGET%" >> "%LOG%" 2>&1
-if errorlevel 1 (
-  if %RETRY% geq 25 (
-    echo [%date% %time%] Copy failed after 25 attempts >> "%LOG%"
-    goto LAUNCH_FALLBACK
-  )
+if not errorlevel 1 (
+  echo [%date% %time%] Successfully updated %TARGET% on attempt %RETRY% >> "%LOG%"
+  set "TO_LAUNCH=%TARGET%"
+  goto LAUNCH
+)
+
+if %RETRY% lss 20 (
   timeout /t 1 /nobreak >nul
   goto RETRY_COPY
 )
 
-echo [%date% %time%] Copy succeeded on attempt %RETRY% >> "%LOG%"
+echo [%date% %time%] Warning: Could not replace %TARGET% after %RETRY% attempts >> "%LOG%"
+set "TO_LAUNCH=%DOWNLOADED%"
 
-:: Unblock to prevent Windows SmartScreen
-powershell.exe -NoProfile -Command "Unblock-File -LiteralPath '%TARGET%' -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
+:LAUNCH
+:: Also create a versioned copy in TARGETDIR if target had a different name
+set "VERSIONED=%TARGETDIR%\\Nova.Island.%NEW_VERSION%.portable.exe"
+if not "%TO_LAUNCH%"=="%VERSIONED%" (
+  copy /y "%DOWNLOADED%" "%VERSIONED%" >> "%LOG%" 2>&1
+)
 
-echo [%date% %time%] Launching %TARGET% >> "%LOG%"
+:: Unblock the binary to be launched
+powershell.exe -NoProfile -Command "Unblock-File -LiteralPath '%TO_LAUNCH%' -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
+
+echo [%date% %time%] Launching %TO_LAUNCH%... >> "%LOG%"
 cd /d "%TARGETDIR%"
-start "" "%TARGET%"
-echo [%date% %time%] Done >> "%LOG%"
-exit
+start "" "%TO_LAUNCH%"
 
-:LAUNCH_FALLBACK
-echo [%date% %time%] Launching fallback downloaded binary >> "%LOG%"
-powershell.exe -NoProfile -Command "Unblock-File -LiteralPath '%DOWNLOADED%' -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
-start "" "%DOWNLOADED%"
+echo [%date% %time%] Updater finished successfully. >> "%LOG%"
 exit
 `;
 
   try {
     fs.writeFileSync(cmdScriptPath, cmdScript, 'utf8');
 
-    const child = spawn('cmd.exe', ['/c', cmdScriptPath, String(currentPid), downloadedPath, targetExe], {
+    const child = spawn('cmd.exe', ['/c', cmdScriptPath], {
       detached: true,
       stdio: 'ignore',
-      windowsHide: true,
     });
     child.unref();
 
@@ -249,7 +293,7 @@ exit
         }
       } catch {}
       app.exit(0);
-    }, 300);
+    }, 200);
     return true;
   } catch (err) {
     log.info(`failed to launch installer: ${err.message}`);
@@ -294,6 +338,7 @@ function retrySoon() {
 module.exports = {
   start,
   setEnabled,
+  setCleanup,
   checkManual,
   download,
   install,
