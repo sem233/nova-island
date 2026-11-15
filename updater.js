@@ -1,87 +1,257 @@
-// Updates from the GitHub releases (latest.yml): checked a minute after start and every 6 hours,
-// downloaded in the background, then offered on the island ("Update ready · Restart"). An
-// update that is never accepted is installed when the app quits. Only the installed app updates.
+// Updates for Nova Island from GitHub Releases (sem233/nova-island).
+// Supports manual check, progress streaming, in-place portable auto-update and restart.
 const { app } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { spawn } = require('child_process');
 const log = require('./log');
 
-const FIRST_CHECK_MS = 60 * 1000;
+const REPO_OWNER = 'sem233';
+const REPO_NAME = 'nova-island';
+const GITHUB_API_RELEASE = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`;
 const EVERY_MS = 6 * 60 * 60 * 1000;
+const FIRST_CHECK_MS = 60 * 1000;
 
-let updater = null;
+// Local build timestamp for comparing re-uploaded builds under the same tag
+const BUILD_TIME = (() => {
+  try {
+    const pkg = require('./package.json');
+    return pkg.buildTime || fs.statSync(path.join(__dirname, 'package.json')).mtimeMs;
+  } catch {
+    return Date.now();
+  }
+})();
+
 let enabled = false;
-let ready = null; // version downloaded and waiting for a restart
+let ready = null; // { version, path }
+let latestReleaseInfo = null; // { release, asset }
+let downloading = false;
 let timer = null;
 let send = () => {};
-let checkFailed = false; // the last check didn't get through: try again when the PC wakes or goes online
 
-// One short line per kind of failure, at most once a day; none while offline. (electron-updater
-// puts the whole HTTP response with its headers in the message, and reports a failed check twice.)
-const OFFLINE = /ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION|ERR_TIMED_OUT|ENOTFOUND|ETIMEDOUT|ECONNRESET|EAI_AGAIN/;
-const logged = new Map(); // short message -> when
-function logError(what, err) {
-  checkFailed = true;
-  const msg = String(err?.message || err);
-  if (OFFLINE.test(msg)) return;
-  const status = msg.match(/HttpError: (\d{3})/)?.[1];
-  const short = status ? `HTTP ${status}${/latest\.yml/.test(msg) ? ' (latest.yml not found)' : ''}` : msg.split('\n')[0].slice(0, 160);
-  const key = `${what}: ${short}`;
-  if (Date.now() - (logged.get(key) || 0) < 24 * 60 * 60 * 1000) return;
-  logged.set(key, Date.now());
-  log.info(`update ${key}`);
+function semverCmp(a, b) {
+  const pa = (a || '').replace(/^v/, '').split('.').map(Number);
+  const pb = (b || '').replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na !== nb) return na > nb ? 1 : -1;
+  }
+  return 0;
 }
 
-function check() {
-  if (!enabled || !updater) return;
-  // a ready update is offered again on every check until it is installed
+async function fetchLatestRelease() {
+  const r = await fetch(GITHUB_API_RELEASE, {
+    headers: { 'User-Agent': 'Nova-Island-Updater' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function checkManual(force = false) {
+  try {
+    const release = await fetchLatestRelease();
+    const tag = release.tag_name || '';
+    const currentVersion = app?.getVersion ? app.getVersion() : require('./package.json').version;
+    const assets = Array.isArray(release.assets) ? release.assets : [];
+    const asset = assets.find((a) => a.name.endsWith('.exe')) || assets[0];
+
+    if (!asset) {
+      return { ok: false, error: 'No executable asset found in latest release' };
+    }
+
+    const remoteAssetTime = new Date(asset.updated_at || asset.created_at).getTime();
+    const isHigherVersion = semverCmp(tag, currentVersion) > 0;
+    const isNewerBuild = remoteAssetTime > (BUILD_TIME + 60000);
+    const available = force || isHigherVersion || isNewerBuild;
+
+    latestReleaseInfo = { release, asset };
+
+    return {
+      ok: true,
+      available,
+      version: tag,
+      currentVersion,
+      assetName: asset.name,
+      sizeMb: (asset.size / (1024 * 1024)).toFixed(1),
+      updatedAt: asset.updated_at,
+      notes: release.body || '',
+      ready: !!ready && ready.version === tag,
+    };
+  } catch (err) {
+    log.info(`update check error: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}
+
+async function download() {
+  if (downloading) return { ok: false, error: 'Download already in progress' };
+  if (!latestReleaseInfo?.asset) {
+    const checkRes = await checkManual(true);
+    if (!checkRes.ok || !latestReleaseInfo?.asset) {
+      return { ok: false, error: checkRes.error || 'No asset to download' };
+    }
+  }
+
+  const asset = latestReleaseInfo.asset;
+  const version = latestReleaseInfo.release.tag_name;
+  downloading = true;
+
+  try {
+    const userDataDir = app?.getPath ? app.getPath('userData') : path.join(process.env.APPDATA || '', 'dynamic-nova');
+    const updatesDir = path.join(userDataDir, 'updates');
+    fs.mkdirSync(updatesDir, { recursive: true });
+    const destPath = path.join(updatesDir, 'Nova.Island.pending.exe');
+
+    send('update-status', { status: 'starting', version, assetName: asset.name });
+
+    const res = await fetch(asset.browser_download_url, {
+      headers: { 'User-Agent': 'Nova-Island-Updater' },
+      signal: AbortSignal.timeout(300000), // 5 minutes timeout for large exe
+    });
+    if (!res.ok) throw new Error(`Download HTTP ${res.status}`);
+
+    const totalBytes = Number(res.headers.get('content-length')) || asset.size || 0;
+    let receivedBytes = 0;
+    const reader = res.body.getReader();
+    const outStream = fs.createWriteStream(destPath);
+
+    let lastProgressPct = -1;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      outStream.write(value);
+      receivedBytes += value.length;
+
+      const pct = totalBytes > 0 ? Math.round((receivedBytes / totalBytes) * 100) : 0;
+      if (pct !== lastProgressPct) {
+        lastProgressPct = pct;
+        send('update-progress', {
+          pct,
+          receivedMb: (receivedBytes / (1024 * 1024)).toFixed(1),
+          totalMb: (totalBytes / (1024 * 1024)).toFixed(1),
+        });
+      }
+    }
+
+    await new Promise((resolve, reject) => {
+      outStream.end((err) => (err ? reject(err) : resolve()));
+    });
+
+    ready = { version, path: destPath };
+    downloading = false;
+
+    send('update-ready', { version });
+    send('update', { version });
+    return { ok: true, version, path: destPath };
+  } catch (err) {
+    downloading = false;
+    log.info(`update download error: ${err.message}`);
+    send('update-status', { status: 'error', error: err.message });
+    return { ok: false, error: err.message };
+  }
+}
+
+function install() {
+  if (!ready || !ready.path) {
+    log.info('install called but no update is ready');
+    return false;
+  }
+
+  const downloadedPath = ready.path;
+  const currentPid = process.pid;
+
+  // Portable exe location or current executable
+  const targetExe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  log.info(`installing update ${ready.version}: replacing ${targetExe} with ${downloadedPath}`);
+
+  // Create detached powershell worker to replace and launch
+  const psScript = `
+    $currentPid = ${currentPid};
+    $downloaded = '${downloadedPath.replace(/'/g, "''")}';
+    $target = '${targetExe.replace(/'/g, "''")}';
+
+    # Wait for the running instance to quit
+    $proc = Get-Process -Id $currentPid -ErrorAction SilentlyContinue;
+    if ($proc) { $proc.WaitForExit(10000); }
+    Start-Sleep -Milliseconds 900;
+
+    # Copy new binary over target
+    if ($downloaded -ne $target) {
+      try {
+        Copy-Item -Path $downloaded -Destination $target -Force;
+      } catch {
+        Start-Sleep -Seconds 1;
+        Copy-Item -Path $downloaded -Destination $target -Force;
+      }
+    }
+
+    # Start the updated app
+    Start-Process -FilePath $target;
+  `;
+
+  try {
+    const child = spawn('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-WindowStyle', 'Hidden',
+      '-Command', psScript,
+    ], {
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+
+    setTimeout(() => {
+      app.quit();
+    }, 200);
+    return true;
+  } catch (err) {
+    log.info(`failed to launch installer: ${err.message}`);
+    return false;
+  }
+}
+
+function checkBackground() {
+  if (!enabled) return;
   if (ready) {
-    send('update', { version: ready });
+    send('update', { version: ready.version });
     return;
   }
-  checkFailed = false;
-  updater.checkForUpdates().catch((err) => logError('check failed', err));
-}
-
-// after sleep or a lost connection: a check that failed is tried again a minute later
-function retrySoon() {
-  if (enabled && updater && checkFailed) setTimeout(check, 60 * 1000);
+  checkManual(false).then((res) => {
+    if (res.ok && res.available) {
+      log.info(`background update available: ${res.version}`);
+      send('update', { version: res.version });
+    }
+  }).catch(() => {});
 }
 
 function start(sendFn, on) {
   send = sendFn;
-  // the Microsoft Store version is updated by the Store
-  if (!app.isPackaged || process.windowsStore) return;
-  ({ autoUpdater: updater } = require('electron-updater'));
-  updater.autoDownload = true;
-  updater.autoInstallOnAppQuit = true;
-  updater.logger = null;
-  updater.on('update-available', (i) => log.info(`update ${i.version} available, downloading`));
-  updater.on('update-downloaded', (i) => {
-    ready = i.version;
-    log.info(`update ${i.version} ready`);
-    send('update', { version: ready });
-  });
-  // a failed check is also reported here: logError keeps it to one line
-  updater.on('error', (err) => logError('check failed', err));
   setEnabled(on);
 }
 
 function setEnabled(on) {
   enabled = !!on;
-  if (updater) updater.autoInstallOnAppQuit = enabled;
   clearTimeout(timer);
   clearInterval(timer);
-  if (!enabled || !updater) return;
+  if (!enabled) return;
   timer = setTimeout(() => {
-    check();
-    timer = setInterval(check, EVERY_MS);
+    checkBackground();
+    timer = setInterval(checkBackground, EVERY_MS);
   }, FIRST_CHECK_MS);
 }
 
-// restart into the downloaded version (silent install, then the app starts again)
-function install() {
-  if (!ready || !updater) return;
-  log.info(`update ${ready} installing, will reopen`);
-  updater.quitAndInstall(true, true);
+function retrySoon() {
+  if (enabled) setTimeout(checkBackground, 60 * 1000);
 }
 
-module.exports = { start, setEnabled, install, retrySoon };
+module.exports = {
+  start,
+  setEnabled,
+  checkManual,
+  download,
+  install,
+  retrySoon,
+};

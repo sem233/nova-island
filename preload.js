@@ -49,6 +49,14 @@ contextBridge.exposeInMainWorld('nova', {
   plugins: () => ipcRenderer.invoke('plugins-active'),
   pluginSet: (id, key, value) => ipcRenderer.send('plugin-setting', id, key, value),
   installUpdate: () => ipcRenderer.send('update-install'),
+  updater: {
+    check: (force) => ipcRenderer.invoke('updater-check', force),
+    download: () => ipcRenderer.invoke('updater-download'),
+    install: () => ipcRenderer.send('updater-install'),
+    onProgress: on('update-progress'),
+    onReady: on('update-ready'),
+    onStatus: on('update-status'),
+  },
   calendar: () => ipcRenderer.invoke('cal-get'),
   openMeeting: (link) => ipcRenderer.send('open-meeting', link),
   downloads: {

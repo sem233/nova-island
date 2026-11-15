@@ -1,6 +1,7 @@
 {
   "name": "nova-island",
-  "version": "1.7.0",
+  "version": "1.7.1",
+  "buildTime": 1731634620000,
   "description": "A living island for your Windows desktop",
   "main": "nova.js",
   "scripts": {
@@ -51,7 +52,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "NOVA-TECH-KIT",
+      "owner": "sem233",
       "repo": "nova-island"
     },
     "asarUnpack": [

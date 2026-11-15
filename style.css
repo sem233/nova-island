@@ -1360,3 +1360,82 @@ body.no-blur:not(.th-solid) .tint, body.no-blur:not(.th-solid) #island.expanded 
   100% { transform: rotate(360deg); }
 }
 
+/* ============ Update Controls ============ */
+.gear.spinning svg, .opt-btn.spinning svg {
+  animation: optSpin 0.7s linear infinite;
+}
+.update-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #ff5252;
+  box-shadow: 0 0 6px #ff5252;
+}
+.meter-update-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.update-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.update-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+.update-title svg {
+  width: 13px;
+  height: 13px;
+  color: var(--accent, #7c9cff);
+}
+.update-title span {
+  font-size: 11px;
+  color: var(--text-2, #8a92a3);
+  font-weight: normal;
+}
+.update-status {
+  font-size: 11px;
+  color: var(--text-2, #8a92a3);
+}
+.update-prog-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.update-prog-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.update-prog-bar b {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent, #7c9cff), #00e676);
+  border-radius: 99px;
+  transition: width 0.2s ease;
+}
+#sys-update-prog-lbl {
+  font-size: 11px;
+  color: var(--text-2, #8a92a3);
+  font-variant-numeric: tabular-nums;
+  min-width: 45px;
+  text-align: right;
+}
+
+

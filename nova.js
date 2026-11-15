@@ -1073,6 +1073,9 @@ function openNovaLink(link) {
 // the island page reports once all its scripts ran (an early error would stop it before this)
 ipcMain.on('island-ready', () => log.info('island ready'));
 ipcMain.on('update-install', () => updater.install());
+ipcMain.handle('updater-check', (_e, force) => updater.checkManual(force));
+ipcMain.handle('updater-download', () => updater.download());
+ipcMain.on('updater-install', () => updater.install());
 ipcMain.handle('features-get', () => features.get());
 ipcMain.handle('island-features', () => islandFeatures());
 ipcMain.on('features-set', (_e, patch) => features.set(patch));
