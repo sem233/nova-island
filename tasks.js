@@ -48,7 +48,7 @@ function save() {
   } catch {}
 }
 
-const PRIO_WEIGHT = { high: 3, normal: 2, low: 1 };
+const PRIO_WEIGHT = { urgent: 4, high: 3, normal: 2, low: 1 };
 
 function list() {
   const tasks = load();
@@ -64,7 +64,7 @@ function list() {
 function add(text, opts = {}) {
   if (typeof text !== 'string' || !text.trim()) return null;
   const tasks = load();
-  const priority = ['high', 'normal', 'low'].includes(opts.priority) ? opts.priority : 'normal';
+  const priority = ['urgent', 'high', 'normal', 'low'].includes(opts.priority) ? opts.priority : 'normal';
   const due = typeof opts.due === 'string' ? opts.due.trim().slice(0, 50) : '';
   const task = {
     id: `t:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,

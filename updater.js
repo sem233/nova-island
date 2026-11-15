@@ -62,10 +62,8 @@ async function checkManual(force = false) {
       return { ok: false, error: 'No executable asset found in latest release' };
     }
 
-    const remoteAssetTime = new Date(asset.updated_at || asset.created_at).getTime();
     const isHigherVersion = semverCmp(tag, currentVersion) > 0;
-    const isNewerBuild = semverCmp(tag, currentVersion) === 0 && (remoteAssetTime > (BUILD_TIME + 60000));
-    const available = isHigherVersion || isNewerBuild;
+    const available = isHigherVersion;
 
     latestReleaseInfo = { release, asset };
 
@@ -119,6 +117,7 @@ async function download() {
     const outStream = fs.createWriteStream(destPath);
 
     let lastProgressPct = -1;
+    let lastSent = 0;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -126,8 +125,10 @@ async function download() {
       receivedBytes += value.length;
 
       const pct = totalBytes > 0 ? Math.round((receivedBytes / totalBytes) * 100) : 0;
-      if (pct !== lastProgressPct) {
+      const now = Date.now();
+      if (pct !== lastProgressPct || now - lastSent > 250) {
         lastProgressPct = pct;
+        lastSent = now;
         send('update-progress', {
           pct,
           version,
@@ -171,94 +172,69 @@ function install() {
   const updatesDir = path.join(userDataDir, 'updates');
   fs.mkdirSync(updatesDir, { recursive: true });
 
-  const psScriptPath = path.join(updatesDir, 'apply-update.ps1');
+  const cmdScriptPath = path.join(updatesDir, 'apply-update.cmd');
+  const logPath = path.join(updatesDir, 'updater.log');
 
   log.info(`installing update ${ready.version}: replacing ${targetExe} with ${downloadedPath}`);
 
-  // Create robust powershell worker script
-  const psScript = `
-# Nova Island Update Installer Script
-$ErrorActionPreference = 'SilentlyContinue'
+  const cmdScript = `@echo off
+set LOG="${logPath}"
+echo [%date% %time%] Updater starting for PID %1 > "%LOG%"
+set PID=%1
+set DOWNLOADED=%~2
+set TARGET=%~3
+set TARGETDIR=%~dp3
 
-$electronPid = ${currentPid}
-$downloaded = '${downloadedPath.replace(/'/g, "''")}'
-$target = '${targetExe.replace(/'/g, "''")}'
-$targetDir = '${targetDir.replace(/'/g, "''")}'
+echo [%date% %time%] Target: %TARGET% >> "%LOG%"
+echo [%date% %time%] Downloaded: %DOWNLOADED% >> "%LOG%"
+echo [%date% %time%] Waiting for PID %PID% to terminate... >> "%LOG%"
 
-# 1. Wait for the Electron child process to exit
-$proc = Get-Process -Id $electronPid -ErrorAction SilentlyContinue
-if ($proc) {
-  $proc.WaitForExit(15000)
-}
+:WAIT_PID
+timeout /t 1 /nobreak >nul
+tasklist /fi "pid eq %PID%" 2>nul | find "%PID%" >nul
+if not errorlevel 1 goto WAIT_PID
 
-# 2. Wait until NSIS wrapper and all processes holding the target file have exited
-# and we can open the target file with exclusive write access
-$targetUnlocked = $false
-for ($i = 0; $i -lt 50; $i++) {
-  Start-Sleep -Milliseconds 400
-  $locking = Get-Process | Where-Object {
-    try { $_.Path -eq $target -or $_.Id -eq $electronPid } catch { $false }
-  }
-  if ($locking) { continue }
+echo [%date% %time%] PID %PID% terminated. Waiting 2s for handle release... >> "%LOG%"
+timeout /t 2 /nobreak >nul
 
-  try {
-    if (Test-Path -LiteralPath $target) {
-      $stream = [System.IO.File]::Open($target, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
-      $stream.Close()
-      $stream.Dispose()
-    }
-    $targetUnlocked = $true
-    break
-  } catch {
-    # Still locked by quitting process or antivirus
-  }
-}
+set RETRY=0
+:RETRY_COPY
+set /a RETRY+=1
+copy /y "%DOWNLOADED%" "%TARGET%" >> "%LOG%" 2>&1
+if errorlevel 1 (
+  if %RETRY% geq 25 (
+    echo [%date% %time%] Copy failed after 25 attempts >> "%LOG%"
+    goto LAUNCH_FALLBACK
+  )
+  timeout /t 1 /nobreak >nul
+  goto RETRY_COPY
+)
 
-# Additional short pause to allow Windows kernel to release single-instance mutexes
-Start-Sleep -Milliseconds 600
+echo [%date% %time%] Copy succeeded on attempt %RETRY% >> "%LOG%"
 
-# 3. Replace the executable with the newly downloaded binary
-$replaced = $false
-if ($downloaded -ne $target) {
-  for ($i = 0; $i -lt 15; $i++) {
-    try {
-      Copy-Item -LiteralPath $downloaded -Destination $target -Force -ErrorAction Stop
-      $replaced = $true
-      break
-    } catch {
-      Start-Sleep -Milliseconds 500
-    }
-  }
-} else {
-  $replaced = $true
-}
+:: Unblock to prevent Windows SmartScreen
+powershell.exe -NoProfile -Command "Unblock-File -LiteralPath '%TARGET%' -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
 
-# 4. Launch the updated application
-if ($replaced -and (Test-Path -LiteralPath $target)) {
-  Start-Process -FilePath $target -WorkingDirectory $targetDir
-} else {
-  # Fallback: Copy to "Nova Island.exe" in target folder or run downloaded directly
-  $fallbackPath = Join-Path $targetDir "Nova Island.exe"
-  try {
-    Copy-Item -LiteralPath $downloaded -Destination $fallbackPath -Force -ErrorAction Stop
-    Start-Process -FilePath $fallbackPath -WorkingDirectory $targetDir
-  } catch {
-    Start-Process -FilePath $downloaded -WorkingDirectory (Split-Path -Parent $downloaded)
-  }
-}
+echo [%date% %time%] Launching %TARGET% >> "%LOG%"
+cd /d "%TARGETDIR%"
+start "" "%TARGET%"
+echo [%date% %time%] Done >> "%LOG%"
+exit
+
+:LAUNCH_FALLBACK
+echo [%date% %time%] Launching fallback downloaded binary >> "%LOG%"
+powershell.exe -NoProfile -Command "Unblock-File -LiteralPath '%DOWNLOADED%' -ErrorAction SilentlyContinue" >> "%LOG%" 2>&1
+start "" "%DOWNLOADED%"
+exit
 `;
 
   try {
-    fs.writeFileSync(psScriptPath, psScript, 'utf8');
+    fs.writeFileSync(cmdScriptPath, cmdScript, 'utf8');
 
-    const child = spawn('powershell.exe', [
-      '-NoProfile',
-      '-ExecutionPolicy', 'Bypass',
-      '-WindowStyle', 'Hidden',
-      '-File', psScriptPath,
-    ], {
+    const child = spawn('cmd.exe', ['/c', cmdScriptPath, String(currentPid), downloadedPath, targetExe], {
       detached: true,
       stdio: 'ignore',
+      windowsHide: true,
     });
     child.unref();
 
@@ -273,7 +249,7 @@ if ($replaced -and (Test-Path -LiteralPath $target)) {
         }
       } catch {}
       app.exit(0);
-    }, 250);
+    }, 300);
     return true;
   } catch (err) {
     log.info(`failed to launch installer: ${err.message}`);

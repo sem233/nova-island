@@ -61,7 +61,7 @@
 
       const prio = document.createElement('span');
       prio.className = `task-prio prio-${t.priority || 'normal'}`;
-      prio.textContent = t.priority === 'high' ? 'High' : t.priority === 'low' ? 'Low' : 'Normal';
+      prio.textContent = t.priority === 'urgent' ? 'Urgent' : t.priority === 'high' ? 'High' : t.priority === 'low' ? 'Low' : 'Normal';
       meta.appendChild(prio);
 
       if (t.due) {

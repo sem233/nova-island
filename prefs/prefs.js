@@ -188,7 +188,8 @@ let updateReadyVersion = null;
 if (updateCheckBtn && api.updater) {
   updateCheckBtn.addEventListener('click', async () => {
     if (updateReadyVersion) {
-      updateStatusTxt.textContent = 'Restarting to install update… (إعادة التشغيل والتثبيت)';
+      updateStatusTxt.textContent = 'Restarting to install update… (جاري إعادة التشغيل والتثبيت)';
+      updateCheckBtn.disabled = true;
       api.updater.install();
       return;
     }
@@ -243,7 +244,10 @@ if (updateCheckBtn && api.updater) {
   if (api.updater.onProgress) {
     api.updater.onProgress((p) => {
       const pct = p.pct || 0;
-      if (updateProgWrap) updateProgWrap.hidden = false;
+      if (updateProgWrap) {
+        updateProgWrap.hidden = false;
+        updateProgWrap.style.display = 'block';
+      }
       if (updateBar) updateBar.style.width = `${pct}%`;
       if (updateLbl) updateLbl.textContent = `Downloading ${p.version || ''}... ${pct}%`;
       if (updateBytes) updateBytes.textContent = `${p.receivedMb} / ${p.totalMb} MB`;

@@ -173,6 +173,11 @@
   letter-spacing: 0.04em;
 }
 
+.task-prio.prio-urgent {
+  color: #ff3366;
+  font-weight: 800;
+}
+
 .task-prio.prio-high {
   color: #ff5252;
 }
