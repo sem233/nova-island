@@ -840,6 +840,7 @@ function setActive(on) {
   if (on) scheduleCapture(60);
   if (!on && win.isFocusable()) win.setFocusable(false);
   send('hover', on);
+  log.info(`[island] hover state: ${on ? 'ACTIVE' : 'INACTIVE'}`);
   try {
     system.setStatsEvery(on ? (perfSlow() ? 5000 : 2000) : 10000);
   } catch {}
@@ -1310,7 +1311,11 @@ app.whenReady().then(() => {
     send(ch, data);
     prefsWindow.send(ch, data);
   });
-  widgetsWindow.start(prayer);
+  try {
+    widgetsWindow.start(prayer);
+  } catch (err) {
+    console.error('[widgets-window] start failed:', err);
+  }
   // waking from sleep or getting the internet back: weather, prayer times and a failed update
   // check catch up at once instead of waiting for their next timer (5 s for Wi-Fi to reconnect)
   let wakeTimer = null;

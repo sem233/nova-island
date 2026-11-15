@@ -147,5 +147,6 @@ function reset() {
 }
 
 const onChange = (fn) => listeners.push(fn);
+const listen = onChange;
 
-module.exports = { get, set, reset, onChange, DEFAULTS, SOLID_THEMES };
+module.exports = { get, set, reset, onChange, listen, DEFAULTS, SOLID_THEMES };

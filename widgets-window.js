@@ -88,7 +88,8 @@ function sync() {
 
 function start(prayer) {
   prayerModule = prayer;
-  features.listen(() => sync());
+  if (features.listen) features.listen(() => sync());
+  else if (features.onChange) features.onChange(() => sync());
 
   ipcMain.on('widgets-reset-pos', resetPos);
   ipcMain.handle('widgets-features', () => features.get());
