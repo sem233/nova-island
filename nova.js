@@ -572,6 +572,8 @@ ipcMain.handle('mini-open', async (_e, req) => {
 const mdm = require('./mdm');
 const clips = require('./clips');
 clips.init(() => send('clips', clips.list()));
+const tasks = require('./tasks');
+tasks.init(() => send('tasks-update', tasks.list()));
 let videoDlBusy = false;
 
 async function resolveBrowserUrl(proc, title) {
@@ -928,6 +930,7 @@ ipcMain.on('shelf-drag', (e, p) => shelf.startDrag(e.sender, p));
 
 // --- system ---
 ipcMain.handle('system-snapshot', () => system.snapshot());
+ipcMain.handle('system-optimize', () => system.optimize());
 ipcMain.on('clip-copy', (_e, i) => system.copyClip(i));
 ipcMain.on('clip-clear', () => system.clearClips());
 ipcMain.handle('prayer-snapshot', () => prayer.snapshot());

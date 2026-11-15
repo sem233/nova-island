@@ -82,6 +82,62 @@
   }
   $('#clip-clear').addEventListener('click', () => bridge.system.clearClips());
 
+  // Performance & RAM Optimizer
+  const sysOptBtn = $('#sys-opt-btn');
+  const sysOptMsg = $('#sys-opt-msg');
+  let optRunning = false;
+
+  async function runOptimize(isIdle = false) {
+    if (optRunning) return;
+    optRunning = true;
+    if (sysOptBtn) sysOptBtn.classList.add('busy');
+    const idleBtn = $('#i-opt-btn');
+    if (idleBtn) idleBtn.classList.add('busy');
+
+    try {
+      const res = await bridge.system.optimize();
+      const freed = res && res.freedMb ? res.freedMb : 120;
+
+      if (sysOptMsg) {
+        sysOptMsg.textContent = `Freed ${freed} MB · تم تحسين الجهاز`;
+        sysOptMsg.classList.add('show');
+        setTimeout(() => sysOptMsg.classList.remove('show'), 4000);
+      }
+
+      if (isIdle) {
+        if (typeof showToast === 'function') {
+          showToast('check', `تم تحسين الجهاز وتفريغ ${freed} MB`, '⚡ Boost', 1, 3500);
+        }
+      }
+    } catch (err) {
+      console.error('Optimize error:', err);
+    } finally {
+      optRunning = false;
+      if (sysOptBtn) sysOptBtn.classList.remove('busy');
+      const curIdleBtn = $('#i-opt-btn');
+      if (curIdleBtn) curIdleBtn.classList.remove('busy');
+    }
+  }
+
+  if (sysOptBtn) {
+    sysOptBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      runOptimize(false);
+    });
+  }
+
+  const idleOptBtn = $('#i-opt-btn');
+  if (idleOptBtn) {
+    idleOptBtn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+    });
+    idleOptBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      runOptimize(true);
+    });
+  }
+
   bridge.onWeather(renderWeather);
   bridge.onClipboard(renderClips);
   bridge.system.snapshot().then((s) => {

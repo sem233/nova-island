@@ -34,6 +34,9 @@ const state = {
   sceneUntil: 0, // the island is a character (views/scene.js) until then
   radio: { on: false, name: '' }, // Quran Radio (plugin) playing, filled by views/radio.js
   radioTab: false, // the Quran Radio plugin is installed and on
+  tasksTab: false, // the Tasks plugin is installed and on
+  widgetSize: 'medium', // small | medium | large
+  widgetStyle: 1, // 1 | 2 | 3 (from user designs)
 };
 const feat = (key) => state.features[key] !== false;
 
@@ -234,7 +237,7 @@ bridge.onToggle(() => {
 });
 
 // ---------------- drag to move (docks when dropped at the top edge) ----------------
-const NO_DRAG = 'button, input, textarea, .slider, .file, .app, .pick, .picker, .clip-item, .shelf-items, .vdl-drawer, .qc-list, .qc-textarea, .qc-add-panel, .qc-action-btn, .qc-icon-btn, .qc-btn, .qc-row';
+const NO_DRAG = 'button, input, textarea, .slider, .file, .app, .pick, .picker, .clip-item, .shelf-items, .vdl-drawer, .qc-list, .qc-textarea, .qc-add-panel, .qc-action-btn, .qc-icon-btn, .qc-btn, .qc-row, .opt-btn, #i-opt-btn, .widget-style-btn, .widget-size-btn, .task-item, .task-btn, .task-checkbox';
 let press = null;
 let justMoved = false;
 
@@ -1310,15 +1313,15 @@ setInterval(() => {
 }, 250);
 
 // ---------------- settings ----------------
-const TAB_FEATURE = { media: 'tabMedia', apps: 'tabApps', shelf: 'tabShelf', quickclips: 'tabClips', prayer: 'tabPrayer', timer: 'tabTimer', system: 'tabSystem' };
+const TAB_FEATURE = { media: 'tabMedia', apps: 'tabApps', shelf: 'tabShelf', quickclips: 'tabClips', widgets: 'tabWidgets', prayer: 'tabPrayer', timer: 'tabTimer', system: 'tabSystem' };
 
 // Hide tabs that are switched off (Downloads shows itself only around download activity).
 function refreshTabs() {
   let changed = false;
   $$('.tab').forEach((b) => {
     const t = b.dataset.tab;
-    // Downloads shows itself around download activity, Radio only with its plugin
-    const hide = t === 'downloads' ? !state.dl.tab : t === 'radio' ? !state.radioTab : !feat(TAB_FEATURE[t]);
+    // Downloads shows itself around download activity, Radio only with its plugin, Tasks with its plugin
+    const hide = t === 'downloads' ? !state.dl.tab : t === 'radio' ? !state.radioTab : t === 'tasks' ? !state.tasksTab : !feat(TAB_FEATURE[t]);
     if (b.hidden !== hide) {
       b.hidden = hide;
       changed = true;

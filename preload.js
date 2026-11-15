@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('nova', {
 
   system: {
     snapshot: () => ipcRenderer.invoke('system-snapshot'),
+    optimize: () => ipcRenderer.invoke('system-optimize'),
     copyClip: (i) => ipcRenderer.send('clip-copy', i),
     clearClips: () => ipcRenderer.send('clip-clear'),
   },
@@ -110,5 +111,14 @@ contextBridge.exposeInMainWorld('nova', {
     clear:            (keepPinned) => ipcRenderer.invoke('clips-clear', keepPinned),
     copy:             (id)         => ipcRenderer.send('clips-copy', id),
     onUpdate:         on('clips'),
+  },
+
+  tasks: {
+    list:     ()           => ipcRenderer.invoke('tasks-list'),
+    add:      (text, opts) => ipcRenderer.invoke('tasks-add', text, opts),
+    toggle:   (id, done)   => ipcRenderer.invoke('tasks-toggle', id, done),
+    remove:   (id)         => ipcRenderer.invoke('tasks-remove', id),
+    clear:    (compOnly)   => ipcRenderer.invoke('tasks-clear', compOnly),
+    onUpdate: on('tasks-update'),
   },
 });

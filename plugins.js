@@ -43,7 +43,10 @@ function checkRadio(m) {
   }
   return { stations };
 }
-const KINDS = { radio: checkRadio };
+function checkTasks(m) {
+  return { tasks: Array.isArray(m.tasks) ? m.tasks : [] };
+}
+const KINDS = { radio: checkRadio, tasks: checkTasks };
 
 function checkSettings(list) {
   const out = [];
@@ -94,7 +97,7 @@ function values(m) {
 function active() {
   return Object.values(installed)
     .filter((m) => state[m.id]?.enabled !== false)
-    .map((m) => ({ id: m.id, kind: m.kind, name: m.name, stations: m.stations, values: values(m) }));
+    .map((m) => ({ id: m.id, kind: m.kind, name: m.name, description: m.description, stations: m.stations, tasks: m.tasks, values: values(m) }));
 }
 
 const newer = (a, b) => {

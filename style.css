@@ -1274,3 +1274,89 @@ body.th-rec:not(.th-solid) .clip { background: var(--th-solid, rgb(29, 31, 39));
 /* Remove blur (or the battery saver) still means a solid island on the glass themes */
 body.no-blur:not(.th-solid) .clip { background: rgb(20, 20, 26); }
 body.no-blur:not(.th-solid) .tint, body.no-blur:not(.th-solid) #island.expanded .tint, body.no-blur:not(.th-solid) #island.peek .tint { background: rgba(20, 20, 26, .97); }
+
+/* ============ Memory & Performance Optimizer ============ */
+.i-opt-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(124, 156, 255, 0.16);
+  border: 1px solid rgba(124, 156, 255, 0.35);
+  color: #7c9cff;
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  padding: 0;
+  margin-left: 3px;
+  transition: all 0.18s ease;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.i-opt-btn svg {
+  width: 11px;
+  height: 11px;
+}
+.i-opt-btn:hover {
+  background: rgba(124, 156, 255, 0.38);
+  border-color: #7c9cff;
+  color: #ffffff;
+  transform: scale(1.15);
+  box-shadow: 0 0 10px rgba(124, 156, 255, 0.5);
+}
+.i-opt-btn:active {
+  transform: scale(0.9);
+}
+.i-opt-btn.busy svg, .opt-btn.busy svg {
+  animation: optSpin 0.7s linear infinite;
+}
+
+.meter-opt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.opt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 99px;
+  background: rgba(124, 156, 255, 0.16);
+  border: 1px solid rgba(124, 156, 255, 0.35);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.opt-btn svg {
+  width: 13px;
+  height: 13px;
+  color: #ffd479;
+}
+.opt-btn:hover {
+  background: rgba(124, 156, 255, 0.28);
+  border-color: var(--accent, #7c9cff);
+  box-shadow: 0 0 12px rgba(124, 156, 255, 0.35);
+}
+.opt-btn:active {
+  transform: scale(0.96);
+}
+.opt-msg {
+  font-size: 11px;
+  color: #00e676;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+}
+.opt-msg.show {
+  opacity: 1;
+}
+@keyframes optSpin {
+  100% { transform: rotate(360deg); }
+}
+
