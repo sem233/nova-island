@@ -28,6 +28,24 @@ fn now_ms() -> u64 {
 }
 
 const MAX_CLIPS: usize = 200;
+const MAX_CLIP_BYTES: usize = 10_000;
+
+/// Truncate only at a UTF-8 character boundary. Byte-index slicing at the limit
+/// can panic when it splits an Arabic character or emoji.
+fn truncate_clip(text: &str) -> String {
+    if text.len() <= MAX_CLIP_BYTES {
+        return text.to_string();
+    }
+    let mut end = 0;
+    for (start, ch) in text.char_indices() {
+        let next = start + ch.len_utf8();
+        if next > MAX_CLIP_BYTES {
+            break;
+        }
+        end = next;
+    }
+    text[..end].to_string()
+}
 
 #[derive(Clone)]
 pub struct ClipsManager {
@@ -89,7 +107,7 @@ impl ClipsManager {
         if text.is_empty() || text == "[object Promise]" {
             return Value::Null;
         }
-        let text = if text.len() > 10000 { &text[..10000] } else { text }.to_string();
+        let text = truncate_clip(text);
         let mut list = self.load_internal();
 
         // deduplicate: if already exists, move to front and update timestamp
@@ -140,9 +158,10 @@ impl ClipsManager {
         if text.is_empty() {
             return self.list();
         }
+        let text = truncate_clip(text);
         let mut list = self.load_internal();
         if let Some(c) = list.iter_mut().find(|c| c.id == id) {
-            c.text = if text.len() > 10000 { &text[..10000] } else { text }.to_string();
+            c.text = text;
             c.updated_at = Some(now_ms());
             self.save_internal(&list);
         }
@@ -175,5 +194,25 @@ impl ClipsManager {
             return Value::Null;
         }
         self.add(&text)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{truncate_clip, MAX_CLIP_BYTES};
+
+    #[test]
+    fn truncation_never_splits_utf8() {
+        let text = format!("{}🙂tail", "a".repeat(MAX_CLIP_BYTES - 1));
+        let got = truncate_clip(&text);
+        assert_eq!(got.len(), MAX_CLIP_BYTES - 1);
+        assert!(got.is_char_boundary(got.len()));
+        assert!(got.ends_with('a'));
+    }
+
+    #[test]
+    fn short_clip_is_unchanged() {
+        let text = "سلام 👋";
+        assert_eq!(truncate_clip(text), text);
     }
 }
