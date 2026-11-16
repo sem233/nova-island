@@ -70,9 +70,36 @@ pub fn find_ffmpeg(data_dir: &Path) -> Option<PathBuf> {
         return Some(local);
     }
 
-    // 3. In common app directories
+    // 3. In WinGet packages or Links
     if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
         let la = PathBuf::from(&local_app);
+        let link = la.join("Microsoft").join("WinGet").join("Links").join("ffmpeg.exe");
+        if link.is_file() {
+            return Some(link);
+        }
+        let packages = la.join("Microsoft").join("WinGet").join("Packages");
+        if packages.is_dir() {
+            if let Ok(entries) = fs::read_dir(&packages) {
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_lowercase();
+                    if name.contains("ffmpeg") {
+                        let path = e.path();
+                        let cand1 = path.join("bin").join("ffmpeg.exe");
+                        if cand1.is_file() {
+                            return Some(cand1);
+                        }
+                        if let Ok(subs) = fs::read_dir(&path) {
+                            for sub in subs.flatten() {
+                                let cand2 = sub.path().join("bin").join("ffmpeg.exe");
+                                if cand2.is_file() {
+                                    return Some(cand2);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         for sub in &[
             "CapCut\\Apps\\4.6.0.1754",
             "Filee\\engines\\ffmpeg\\bin",
@@ -166,20 +193,13 @@ pub fn resolve_url(req: &Value) -> Option<String> {
         }
     }
 
-    // 4. Fallback: check clipboard for any video/web link
+    // 4. Fallback: check clipboard for any web link
     let clip_text = nova_sys::clip::read_text();
     let trimmed = clip_text.trim();
     if (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
-        && (trimmed.contains("youtube")
-            || trimmed.contains("youtu.be")
-            || trimmed.contains("facebook")
-            || trimmed.contains("tiktok")
-            || trimmed.contains("instagram")
-            || trimmed.contains("twitter")
-            || trimmed.contains("x.com")
-            || trimmed.contains("vimeo")
-            || trimmed.contains(".mp4")
-            || trimmed.contains(".m3u8"))
+        && trimmed.contains('.')
+        && !trimmed.contains(' ')
+        && trimmed.len() >= 10
     {
         return Some(trimmed.to_string());
     }
@@ -200,7 +220,12 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
 
     // Run yt-dlp -J --no-playlist
     let mut cmd = Command::new(&ytdlp);
-    cmd.args(["-J", "--no-playlist", "--socket-timeout", "20", &url]);
+    cmd.args(["-J", "--no-playlist", "--socket-timeout", "20"]);
+    if let Some(ff) = find_ffmpeg(data_dir) {
+        cmd.arg("--ffmpeg-location");
+        cmd.arg(ff.to_string_lossy().as_ref());
+    }
+    cmd.arg(&url);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -318,13 +343,15 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
     args.push("--windows-filenames".to_string());
     args.push("-o".to_string());
     args.push(template);
+    args.push("--user-agent".to_string());
+    args.push("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".to_string());
+    args.push("--referer".to_string());
+    args.push(url.clone());
 
     let ffmpeg = find_ffmpeg(data_dir);
     if let Some(ff) = &ffmpeg {
-        if let Some(dir) = ff.parent() {
-            args.push("--ffmpeg-location".to_string());
-            args.push(dir.to_string_lossy().into_owned());
-        }
+        args.push("--ffmpeg-location".to_string());
+        args.push(ff.to_string_lossy().into_owned());
     }
 
     if kind == "audio" {
