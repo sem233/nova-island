@@ -320,28 +320,45 @@
   color: var(--accent, #7c9cff);
 }
 
-/* Video Downloader (MDM) */
-.vdl { margin-inline-end: 6px; transition: background .2s ease, color .2s ease, transform .28s var(--spring); position: relative; }
-.vdl .ico-x { display: none; }
-.vdl.done { color: var(--green, #30d158); }
+/* Topbar + Compact layout fixes */
+.topbar { column-gap: 8px; }
+.topbar .chip { max-width: 82px; padding-right: 9px; }
+.topbar .seg { max-width: 100%; overflow: hidden; }
+.topbar .tab { padding: 0 5.5px; }
+.topbar .tab svg { width: 14px; height: 14px; }
+.topbar .tab.active { padding: 0 9px; gap: 5px; }
+.topbar .tab.active span { max-width: 68px; font-size: 11px; }
+.l-compact > .side { flex: none; }
 
-/* Busy spinner: يظهر لما جاري البحث عن الجودات */
-.vdl.busy { pointer-events: none; }
-.vdl.busy .ico,
-.vdl.busy .ico-x { opacity: 0; }
-.vdl.busy::after {
+/* Video Downloader (MDM) */
+.media .m-body { position: relative; min-height: 124px; }
+.vdl { flex: none; background: var(--fill-1); position: relative; transition: background .2s ease, color .2s ease, transform .28s var(--spring); }
+.vdl .ico-x { display: none; }
+.vdl .spin { display: none; width: 15px; height: 15px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, .25); border-top-color: #fff; animation: spin .8s linear infinite; }
+.vdl.done { color: var(--green, #30d158); }
+.vdl.ready::before {
   content: '';
   position: absolute;
-  inset: 4px;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  border: 2px solid transparent;
-  border-top-color: rgb(var(--accent-rgb, 124, 156, 255));
-  border-right-color: rgba(var(--accent-rgb, 124, 156, 255), .4);
-  animation: vdl-spin .7s linear infinite;
+  background: var(--green, #30d158);
+  box-shadow: 0 0 6px rgba(48, 209, 88, .75);
+  pointer-events: none;
 }
-@keyframes vdl-spin { to { transform: rotate(360deg); } }
+#v-media.picking .vdl.ready::before,
+.vdl.busy::before { display: none; }
 
-/* dl-flash: وميض ناعم على الجزيرة لما الجودات جاهزة */
+/* Busy spinner: matches .pip .spin */
+.vdl.busy { pointer-events: none; }
+.vdl.busy .ico,
+.vdl.busy .ico-x { display: none; }
+.vdl.busy .spin { display: block; }
+.sub.ok { color: var(--green, #30d158); }
+
+/* dl-flash: subtle glow when qualities become ready */
 @keyframes dl-flash-pulse {
   0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 124, 156, 255), 0); }
   40%  { box-shadow: 0 0 0 6px rgba(var(--accent-rgb, 124, 156, 255), .35); }
@@ -355,7 +372,7 @@
 #v-media.picking .progress,
 #v-media.picking .controls { opacity: 0; transform: translateY(8px) scale(.96); pointer-events: none; }
 .vdl-drawer {
-  position: absolute; left: 0; right: 0; bottom: -2px; top: 44px; z-index: 4;
+  position: absolute; left: 0; right: 0; bottom: -2px; top: 46px; z-index: 4;
   display: flex; flex-direction: column; justify-content: center;
   opacity: 0; visibility: hidden; transform: translateY(-6px) scale(.96); pointer-events: none;
   transition: opacity .22s ease, transform .36s var(--spring), visibility .22s;
@@ -365,13 +382,14 @@
 }
 .vdl-list {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px;
-  max-height: 80px; overflow-y: auto; padding: 2px 1px;
+  max-height: 80px; overflow-y: auto; padding: 2px 1px; direction: ltr;
 }
 .vdl-list::-webkit-scrollbar { width: 4px; }
 .vdl-list::-webkit-scrollbar-thumb { background: var(--fill-2); border-radius: 2px; }
 .vdl-chip {
-  height: 35px; padding: 0 9px; border-radius: 11px;
-  display: flex; align-items: center; justify-content: space-between; gap: 4px;
+  min-width: 0; overflow: hidden;
+  height: 35px; padding: 0 7px; border-radius: 11px;
+  display: flex; align-items: center; justify-content: space-between; gap: 3px;
   background: var(--card); box-shadow: inset 0 0 0 .5px var(--card-stroke);
   color: var(--text-1); text-align: left;
   transition: background .18s ease, transform .25s var(--spring), box-shadow .18s ease;
@@ -398,26 +416,37 @@
   background: linear-gradient(135deg, rgba(48, 209, 88, .28), rgba(94, 234, 212, .16));
   box-shadow: inset 0 0 0 1px rgba(48, 209, 88, .55), 0 4px 12px rgba(0, 0, 0, .24);
 }
-.vdl-q { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 12px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; }
-.vdl-q svg { width: 12px; height: 12px; flex: none; opacity: .9; }
+.vdl-q { display: flex; align-items: center; gap: 3px; min-width: 0; flex: 1; font-size: 11px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; }
+.vdl-q > span { overflow: hidden; text-overflow: ellipsis; }
+.vdl-q svg { width: 11px; height: 11px; flex: none; opacity: .9; }
 .vdl-chip.audio .vdl-q { color: #6ee7b7; }
 .vdl-tag {
-  height: 15px; padding: 0 4.5px; border-radius: 5px; display: inline-flex; align-items: center;
+  flex: none; height: 14px; padding: 0 3.5px; border-radius: 4.5px; display: inline-flex; align-items: center;
   background: rgba(var(--accent-rgb), .22); color: rgb(var(--accent-rgb));
-  font-size: 9px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase;
+  font-size: 8.5px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase;
 }
 .vdl-chip.audio .vdl-tag { background: rgba(48, 209, 88, .22); color: #6ee7b7; }
-.vdl-sz { font-size: 10.5px; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+.vdl-sz { font-size: 10px; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 
-/* Ensure picking / expanded quality drawer NEVER gets squished into a line */
-#island.addr-line.picking,
-#island.addr-slim.picking,
-#island.picking {
-  --w: 548px !important;
-  --h: 232px !important;
-  --r: 28px !important;
+/* Qualities-ready clickable toast */
+.l-toast.vdl-ready .ico-dl,
+.l-vtoast.vdl-ready .ico-dl { display: block; color: var(--green, #30d158); }
+.l-toast.vdl-ready .batt,
+.l-vtoast.vdl-ready .v-bar { display: none; }
+.l-toast.vdl-ready .t-left { min-width: 0; }
+.l-toast.vdl-ready #t-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.l-toast.vdl-ready #t-value {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 99px;
+  background: var(--green, #30d158);
+  color: #052010;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
 }
-#island.picking .layer {
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
+.l-vtoast.vdl-ready #vt-value { color: var(--green, #30d158); font-weight: 700; }
+
+/* Download row cancel & removal transition */
+.dl-btn[data-act="cancel"]:hover { background: rgba(255, 69, 58, .22); color: #ff6b6b; }
+.dl-row.removing { opacity: 0; transform: translateX(-14px); transition: opacity .22s ease, transform .22s ease; pointer-events: none; }

@@ -86,6 +86,7 @@ pub struct Core {
     ghost_open: bool,
     dimmed: bool,
     clickable: bool,
+    pinned: bool,
     pub island_rect: Rect,
     /// The pill at rest (not opened, no notification): what "over a tab" is decided on, so the
     /// opened island covering a tab doesn't close itself.
@@ -111,7 +112,7 @@ impl Core {
         Core {
             win, send, store, features, prefs,
             anchor: None, last_layout: String::new(), omni: None, omni_key: String::new(), drag: None, drag_from: None,
-            user_hidden: false, fullscreen_hidden: false, tab_rects: Vec::new(), line: false, line_rect: Rect::default(), line_off_since: None, browser_rect: None, ghost: false, ghost_open: false, dimmed: false, clickable: false,
+            user_hidden: false, fullscreen_hidden: false, tab_rects: Vec::new(), line: false, line_rect: Rect::default(), line_off_since: None, browser_rect: None, ghost: false, ghost_open: false, dimmed: false, clickable: false, pinned: false,
             island_rect: Rect::default(), rest_rect: Rect::default(), pending_rest: None, inside: false, active: false, entered_at: Instant::now(), suppress_until_leave: false,
             near_sent: None, cursor_far: false,
         }
@@ -139,7 +140,7 @@ impl Core {
     // While a Chromium browser is in front the island takes the right third of its address bar.
     // Only from the island's default place: never while vertical or after the user put it somewhere.
     pub fn omni_allowed(&self) -> bool {
-        self.features.bool("addrIsland") && !self.vertical() && !self.active && !self.clickable
+        self.features.bool("addrIsland") && !self.vertical()
     }
 
     pub fn on_omni(&mut self, o: &Value) {
@@ -456,7 +457,7 @@ impl Core {
     pub fn update_ghost(&mut self) {
         let mut over = false;
         // opened (by the mouse or a notification): it stays as it is until it closes again
-        if self.active || self.clickable {
+        if self.active || self.clickable || self.pinned {
             self.update_dim();
             return;
         }
@@ -492,17 +493,22 @@ impl Core {
     pub fn set_clickable(&mut self, on: bool) {
         self.clickable = on;
         // it's gone: over the browser the island lets the mouse through again (and doesn't open)
-        if !on && self.ghost {
+        if !on && self.ghost && !self.ghost_open && !self.pinned {
             self.set_active(false);
         }
         self.update_dim();
     }
 
     pub fn set_pinned(&mut self, on: bool) {
-        if !on && self.ghost_open {
+        self.pinned = on;
+        if on {
+            self.ghost_open = true;
+            self.ghost = false;
+        } else if self.ghost_open {
             self.ghost_open = false;
             self.update_ghost();
         }
+        self.update_dim();
     }
 
     /// Ctrl+Alt+I
@@ -577,7 +583,7 @@ impl Core {
         if let Some((r, t)) = self.pending_rest {
             if self.active || self.clickable {
                 self.pending_rest = None;
-            } else if t.elapsed().as_millis() >= 300 {
+            } else if t.elapsed().as_millis() >= 550 {
                 self.pending_rest = None;
                 self.rest_rect = r;
                 self.update_ghost();

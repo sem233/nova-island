@@ -1,10 +1,9 @@
-// IDM Nova downloads, plus browser & MDM downloads seen in the download folders
-// Enhanced with real-time cancel button for running downloads and progress tracking.
+// IDM Nova + Video Downloader (MDM) + browser folder downloads
 (() => {
   const view = $('#v-downloads');
   const list = $('#dl-list');
   const MOVING = ['downloading', 'processing'];
-  const TAB_FOR_MS = 60 * 60 * 1000; // the tab stays for an hour after the last activity
+  const TAB_FOR_MS = 60 * 60 * 1000;
   let lastSeen = 0;
   const ORDER = { downloading: 0, processing: 0, queued: 1, paused: 2, error: 3, completed: 4 };
 
@@ -18,7 +17,7 @@
   const TITLES = {
     pause: 'Pause',
     resume: 'Resume',
-    cancel: 'Cancel download (إيقاف التحميل)',
+    cancel: 'Cancel download (إيقاف وإلغاء التحميل)',
     open: 'Open',
     reveal: 'Show in folder',
   };
@@ -60,16 +59,19 @@
 
   function actions(d) {
     if (d.source === 'folder') {
-      if (MOVING.includes(d.status) || d.status === 'downloading') return ['cancel'];
+      if (MOVING.includes(d.status)) return ['cancel'];
       return d.status === 'completed' ? ['open', 'reveal'] : [];
     }
-    if (MOVING.includes(d.status) || d.status === 'queued') return ['pause', 'cancel'];
-    if (d.status === 'paused' || d.status === 'error') return ['resume', 'cancel'];
+    if (MOVING.includes(d.status) || d.status === 'queued') {
+      return d.source === 'mdm' ? ['pause', 'cancel'] : ['pause'];
+    }
+    if (d.status === 'paused' || d.status === 'error') {
+      return d.source === 'mdm' ? ['resume', 'cancel'] : ['resume'];
+    }
     if (d.status === 'completed') return ['open', 'reveal'];
     return [];
   }
 
-  // ---- list rows, updated in place so buttons don't flicker under the cursor ----
   const thumbs = new Map();
   const thumbOf = (d) => (d.thumbnail?.startsWith('data:') ? d.thumbnail : thumbs.get(d.thumbnail) || '');
   let lastItems = [];
@@ -84,12 +86,16 @@
         '<div class="dl-bar"><b></b></div><div class="dl-meta"></div></div><div class="dl-acts"></div>';
       r.querySelector('.dl-acts').addEventListener('click', (e) => {
         const b = e.target.closest('button');
-        if (b) bridge.downloads.control(r.dataset.id, b.dataset.act);
+        if (!b) return;
+        const act = b.dataset.act;
+        if (act === 'cancel') r.classList.add('removing');
+        bridge.downloads.control(r.dataset.id, act);
       });
       r.dataset.id = d.id;
       rows.set(d.id, r);
     }
-    r.className = `dl-row ${d.status}${d.status === 'processing' || (MOVING.includes(d.status) && pctOf(d) == null) ? ' busy' : ''}`;
+    const removing = r.classList.contains('removing') ? ' removing' : '';
+    r.className = `dl-row ${d.status}${d.status === 'processing' || (MOVING.includes(d.status) && pctOf(d) == null) ? ' busy' : ''}${removing}`;
     const ico = r.querySelector('.dl-ico');
     const thumb = thumbOf(d);
     const icoKey = thumb ? `t:${d.thumbnail.slice(-40)}` : `e:${d.name}`;
@@ -129,17 +135,19 @@
     if (els.some((el, i) => list.children[i] !== el)) els.forEach((el) => list.append(el));
   }
 
-  // ---- toasts on transitions ----
   const known = new Map();
   let primed = false;
   let idmPrimed = false;
   function announce(items, idmOnline) {
+    const seenIds = new Set();
     for (const d of items) {
+      seenIds.add(d.id);
       const prev = known.get(d.id);
-      if ((d.source === 'folder' ? primed : idmPrimed) && feat('dlToasts')) {
+      const ready = d.source === 'folder' || d.source === 'mdm' ? primed : idmPrimed;
+      if (ready && feat('dlToasts')) {
         if (!prev && (MOVING.includes(d.status) || d.status === 'queued')) {
           showToast('dl-start', d.name, 'Downloading', 0, 2600);
-        } else if ((prev ? prev !== 'completed' : d.source === 'folder') && d.status === 'completed') {
+        } else if ((prev ? prev !== 'completed' : (d.source === 'folder' || d.source === 'mdm')) && d.status === 'completed') {
           island.classList.add('dl-flash');
           setTimeout(() => island.classList.remove('dl-flash'), 4300);
           showToast('dl-done', d.name, 'Done', 1, 4200);
@@ -152,11 +160,13 @@
       }
       known.set(d.id, d.status);
     }
+    for (const id of known.keys()) {
+      if (!seenIds.has(id) && (id.startsWith('v:') || id.startsWith('f:'))) known.delete(id);
+    }
     primed = true;
     idmPrimed = idmOnline;
   }
 
-  // ---- pill: ring, name, speed, percent, liquid line ----
   function pill(items) {
     const moving = items.filter((d) => MOVING.includes(d.status));
     const sized = moving.filter((d) => d.total > 0);
@@ -190,36 +200,37 @@
   function update(p) {
     for (const [url, data] of Object.entries(p?.thumbs || {})) thumbs.set(url, data);
     const items = p?.items || [];
-    if (!p?.online) for (const id of known.keys()) if (!id.startsWith('f:')) known.delete(id);
+    if (!p?.online) for (const id of known.keys()) if (!id.startsWith('f:') && !id.startsWith('v:')) known.delete(id);
     view.classList.toggle('dl-offline', !items.length);
     $('#dl-empty-title').textContent = p?.outdated
       ? 'IDM Nova needs an update'
-      : p?.online ? 'No active downloads' : 'IDM Nova is not running';
+      : p?.online ? 'No active downloads' : 'No active downloads';
     $('#dl-empty-sub').textContent = p?.outdated
       ? 'This IDM Nova build can\'t share live progress yet. Install the latest build.'
-      : p?.online
-        ? 'Downloads show up here live, with progress and speed.'
-        : 'Start it or download a video and your downloads will show up here live.';
+      : 'Video & file downloads show up here live with progress, pause, and cancel.';
     $('#dl-launch').hidden = !p?.canLaunch;
+    const dlShow = $('#dl-show');
+    if (dlShow) dlShow.hidden = !p?.online;
 
     if (items.length) lastSeen = Date.now();
     announce(items, !!p?.online);
     pill(items);
     lastItems = items;
     renderList(items);
-    showTab();
+    showTab(items);
     render();
   }
 
-  // Downloads tab: only while something is downloading or within an hour of the last download.
-  function showTab() {
-    const on = (feat('downloads') || feat('folderDownloads')) && (state.dl.active || (lastSeen > 0 && Date.now() - lastSeen < TAB_FOR_MS));
+  function showTab(items = lastItems) {
+    const hasMdm = Array.isArray(items) && items.some((d) => d.source === 'mdm');
+    const on = (feat('downloads') || feat('folderDownloads') || state.dl.active || hasMdm) &&
+      (state.dl.active || (lastSeen > 0 && Date.now() - lastSeen < TAB_FOR_MS));
     if (on === state.dl.tab) return;
     state.dl.tab = on;
     refreshTabs();
   }
-  setInterval(showTab, 60 * 1000);
-  window.addEventListener('island:features', showTab);
+  setInterval(() => showTab(lastItems), 60 * 1000);
+  window.addEventListener('island:features', () => showTab(lastItems));
 
   $('#dl-show').addEventListener('click', () => bridge.downloads.control('', 'show'));
   $('#dl-launch').addEventListener('click', () => bridge.downloads.control('', 'launch'));

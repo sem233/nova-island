@@ -750,6 +750,14 @@ fn run() -> Result<(), String> {
         let _ = std::fs::write(&water_once, b"");
         nova_core::log::info("water reminder: off by default from 1.8.1");
     }
+    // 1.8.8: the legacy Address Bar docking mode (addrIsland) was removed from Settings UI in 1.8.7;
+    // turn off stale enabled values once so opening a browser never squishes the island into a line.
+    let addr_once = dir.join("addr-off-1.8.8");
+    if !addr_once.exists() {
+        features.set(&json!({ "addrIsland": false }));
+        let _ = std::fs::write(&addr_once, b"");
+        nova_core::log::info("addrIsland: off by default from 1.8.8");
+    }
     startup::refresh();
 
     // the page: events go through `send` once the page exists
@@ -833,6 +841,11 @@ fn run() -> Result<(), String> {
     let apps = nova_services::apps::Apps::new(ctx.clone());
     let shelf = nova_services::shelf::Shelf::new(ctx.clone());
     let downloads = nova_services::downloads::Downloads::new(ctx.clone());
+    nova_services::downloads::register_mdm_source(crate::mdm::items, crate::mdm::control);
+    {
+        let dl_notify = downloads.clone();
+        crate::mdm::set_on_change(move || dl_notify.publish_now());
+    }
     let calendar = nova_services::calendar::service::Calendar::new(ctx.clone());
     let plugins = nova_services::plugins::Plugins::new(ctx.clone());
     let tasks = nova_services::tasks::Tasks::new(ctx.clone());

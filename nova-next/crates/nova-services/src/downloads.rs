@@ -38,6 +38,41 @@ const STALLED_MS: f64 = 10.0 * 60.0 * 1000.0; // no growth for this long: shown 
 const KEEP_DONE_MS: f64 = 60.0 * 60.0 * 1000.0;
 const MAX_DONE: usize = 10;
 
+struct MdmSource {
+    items: Arc<dyn Fn() -> Vec<Value> + Send + Sync>,
+    control: Arc<dyn Fn(&str, &str) + Send + Sync>,
+}
+
+static MDM_SOURCE: std::sync::LazyLock<Mutex<Option<MdmSource>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+
+/// Connects built-in MDM video downloads (`v:*` items) into the unified Downloads feed.
+pub fn register_mdm_source(
+    items: impl Fn() -> Vec<Value> + Send + Sync + 'static,
+    control: impl Fn(&str, &str) + Send + Sync + 'static,
+) {
+    *MDM_SOURCE.lock().unwrap() = Some(MdmSource {
+        items: Arc::new(items),
+        control: Arc::new(control),
+    });
+}
+
+fn mdm_items() -> Vec<Value> {
+    // Drop MDM_SOURCE lock before invoking callback so re-entrant publish calls cannot deadlock
+    let f = MDM_SOURCE.lock().ok().and_then(|g| g.as_ref().map(|s| s.items.clone()));
+    f.map_or_else(Vec::new, |cb| cb())
+}
+
+fn mdm_control(id: &str, action: &str) -> bool {
+    let f = MDM_SOURCE.lock().ok().and_then(|g| g.as_ref().map(|s| s.control.clone()));
+    if let Some(cb) = f {
+        cb(id, action);
+        true
+    } else {
+        false
+    }
+}
+
 static EXPECTED_TOTALS: std::sync::LazyLock<Mutex<HashMap<String, u64>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -265,11 +300,25 @@ impl Downloads {
         });
     }
 
-    /// IDM Nova's downloads, then the ones seen in download folders (listed once).
+    /// Built-in video downloads (MDM `v:*`), then IDM Nova's downloads, then download folders (each file listed once).
     fn all_items(&self) -> Vec<Value> {
-        let mut out = self.nova.lock().unwrap().items.clone();
-        let names: HashSet<String> = out.iter().filter_map(|d| d["name"].as_str().map(str::to_string)).collect();
-        out.extend(self.folder_items().into_iter().filter(|d| !names.contains(d["name"].as_str().unwrap_or(""))));
+        let mut out = mdm_items();
+        let nova_items = self.nova.lock().unwrap().items.clone();
+        let mut names: HashSet<String> = out.iter().filter_map(|d| d["name"].as_str().map(str::to_string)).collect();
+        for d in nova_items {
+            if let Some(n) = d["name"].as_str() {
+                if !names.insert(n.to_string()) {
+                    continue;
+                }
+            }
+            out.push(d);
+        }
+        let paths: HashSet<String> = out.iter().filter_map(|d| d["path"].as_str().filter(|p| !p.is_empty()).map(|p| p.to_lowercase())).collect();
+        out.extend(self.folder_items().into_iter().filter(|d| {
+            let n = d["name"].as_str().unwrap_or("");
+            let p = d["path"].as_str().unwrap_or("").to_lowercase();
+            !names.contains(n) && (p.is_empty() || !paths.contains(&p))
+        }));
         out
     }
 
@@ -279,6 +328,18 @@ impl Downloads {
             (n.online, n.outdated)
         };
         json!({ "online": online, "outdated": outdated, "canLaunch": !online && Self::exe_path().is_some(), "items": self.all_items() })
+    }
+
+    /// Triggers an immediate update (used by built-in MDM downloads) and loads any new thumbnails.
+    pub fn publish_now(self: &Arc<Self>) {
+        let urls: Vec<String> = mdm_items()
+            .into_iter()
+            .filter_map(|d| d["thumbnail"].as_str().map(str::to_string))
+            .collect();
+        for u in urls {
+            self.load_thumb(u);
+        }
+        self.publish();
     }
 
     /// For a freshly loaded island: the list plus every thumbnail already fetched.
@@ -305,22 +366,33 @@ impl Downloads {
         let d = self.all_items().into_iter().find(|x| x["id"].as_str() == Some(id));
         match action {
             "open" | "reveal" => {
-                // only paths IDM Nova or the folder watch itself reported
+                // only paths MDM, IDM Nova or the folder watch itself reported
                 if let Some(p) = d.as_ref().and_then(|d| d["path"].as_str()).filter(|p| !p.is_empty()) {
                     crate::shell::open_or_reveal(p, action == "reveal");
                 }
+                return;
             }
             "launch" => {
                 if let Some(exe) = Self::exe_path() {
                     let _ = std::process::Command::new(exe).spawn();
                 }
+                return;
             }
+            _ => {}
+        }
+        if id.starts_with("v:") {
+            if mdm_control(id, action) {
+                self.publish_now();
+            }
+            return;
+        }
+        match action {
             "cancel" => {
                 if let Some(p) = id.strip_prefix("f:") {
                     let _ = std::fs::remove_file(p);
-                    // Also try without .part or other partial extensions
                     let mut f = self.folders.lock().unwrap();
                     f.live.remove(p);
+                    f.ignored.insert(p.to_string());
                     drop(f);
                     self.publish();
                 }

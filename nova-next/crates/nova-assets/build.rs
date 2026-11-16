@@ -176,7 +176,17 @@ const PATCHES: &[(&str, &str, &str)] = &[
     (
         "renderer.js",
         "bridge.onToggle(() => {\n  state.pinned = !state.pinned;\n",
-        "window.state = state;\nwindow.render = render;\nwindow.togglePin = (force) => {\n  state.pinned = typeof force === 'boolean' ? force : !state.pinned;\n  if (!state.pinned) state.hover = false;\n  bridge.setPinned(state.pinned);\n  render();\n  window.dispatchEvent(new CustomEvent('island:pinned', { detail: { pinned: state.pinned } }));\n  return state.pinned;\n};\nbridge.onToggle(() => {\n  window.togglePin();\n",
+        "window.state = state;\nwindow.render = render;\nwindow.setVdlHold = (on) => {\n  const hold = !!on;\n  if (state.vdlHold === hold) return hold;\n  state.vdlHold = hold;\n  bridge.setPinned(Boolean(state.pinned || state.vdlHold));\n  render();\n  return hold;\n};\nwindow.togglePin = (force) => {\n  state.pinned = typeof force === 'boolean' ? force : !state.pinned;\n  if (!state.pinned) { state.hover = false; state.vdlHold = false; }\n  bridge.setPinned(Boolean(state.pinned || state.vdlHold));\n  render();\n  window.dispatchEvent(new CustomEvent('island:pinned', { detail: { pinned: state.pinned } }));\n  return state.pinned;\n};\nbridge.onToggle(() => {\n  window.togglePin();\n",
+    ),
+    (
+        "renderer.js",
+        "  if (state.toastAction && state.toast && now < state.toastUntil && !state.pinned) return 'toast';\n  // a reminder stays put under the cursor so it can be read (hovering pauses it)\n  if (state.reminderUntil > now && !state.pinned && !state.dragging) {\n    return state.toast && now < state.toastUntil ? 'toast' : 'reminder';\n  }\n  if (!state.moving && (state.hover || state.pinned || state.dragging)) return 'expanded';\n",
+        "  if (state.toastAction && state.toast && now < state.toastUntil && !state.pinned && !state.vdlHold) return 'toast';\n  // a reminder stays put under the cursor so it can be read (hovering pauses it)\n  if (state.reminderUntil > now && !state.pinned && !state.vdlHold && !state.dragging) {\n    return state.toast && now < state.toastUntil ? 'toast' : 'reminder';\n  }\n  if (!state.moving && (state.hover || state.pinned || state.vdlHold || state.dragging)) return 'expanded';\n",
+    ),
+    (
+        "renderer.js",
+        "    $('#m-title').textContent = $('#p-title').textContent = m.title || 'Unknown';\n    const sub = m.artist || m.album || appName(m.app);\n    $('#m-artist').textContent = $('#p-artist').textContent = sub;\n",
+        "    $('#m-title').textContent = $('#p-title').textContent = m.title || 'Unknown';\n    const sub = m.artist || m.album || appName(m.app);\n    if (!window.__vdlNote) $('#m-artist').textContent = sub;\n    $('#p-artist').textContent = sub;\n",
     ),
     // Tasks (1.8.3): the island's list, finishing one, snoozing a reminder, opening the window
     (

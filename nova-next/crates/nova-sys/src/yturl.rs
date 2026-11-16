@@ -1,10 +1,12 @@
 //! The URL of the browser tab playing a video (YtUrl.cs, `nova-helper yturl <process> <title>`),
-//! for the mini player. Returns {"url":"...","how":"..."}.
+//! for the mini player and MDM video downloader. Returns {"url":"...","how":"..."}.
 //!   1) reads the address bar of each browser window (windows whose title matches first)
-//!   2) if the playing tab isn't the active one, briefly selects it, reads the URL, then switches
-//!      back to the tab that was active
+//!   2) if allowed (`allow_tab_switch`) and the playing tab isn't the active one, briefly selects
+//!      it, reads the URL, then switches back to the tab that was active
 //! Runs on its own single-threaded apartment, as UI Automation wants.
-use std::{collections::HashSet, time::Duration};
+//! Uses Document-skipping BFS when searching Chrome/Edge UIA trees so heavy web pages are never
+//! traversed (runs in milliseconds instead of hanging for seconds).
+use std::{collections::{HashSet, VecDeque}, time::Duration};
 
 use windows::{
     core::BSTR,
@@ -19,15 +21,28 @@ use windows::{
     },
 };
 
-fn is_video(u: &str) -> bool {
-    let l = u.to_lowercase();
-    let l = l.trim();
-    if l.is_empty() || l.starts_with("chrome://") || l.starts_with("edge://") || l.starts_with("about:") || l.starts_with("brave://") {
+fn is_browser_internal(u: &str) -> bool {
+    let l = u.trim().to_lowercase();
+    l.is_empty()
+        || l.starts_with("chrome://")
+        || l.starts_with("chrome-extension://")
+        || l.starts_with("edge://")
+        || l.starts_with("about:")
+        || l.starts_with("brave://")
+        || l.starts_with("vivaldi://")
+        || l.starts_with("opera://")
+}
+
+/// Known video/streaming URL patterns (matched even when window title wasn't matched verbatim).
+fn is_known_video(u: &str) -> bool {
+    if is_browser_internal(u) {
         return false;
     }
+    let l = u.trim().to_lowercase();
     l.contains("youtube.com")
         || l.contains("youtu.be")
         || l.contains("facebook.com")
+        || l.contains("fb.watch")
         || l.contains("tiktok.com")
         || l.contains("instagram.com")
         || l.contains("twitter.com")
@@ -35,15 +50,47 @@ fn is_video(u: &str) -> bool {
         || l.contains("vimeo.com")
         || l.contains("dailymotion.com")
         || l.contains("soundcloud.com")
-        || l.contains("watch")
-        || l.contains("video")
-        || l.contains(".")
-        || l.starts_with("http")
+        || l.contains("twitch.tv")
+        || l.contains("kick.com")
+        || l.contains("bilibili.com")
+        || l.contains("vk.com")
+        || l.contains("reddit.com")
+        || l.contains("watch?v=")
+        || l.contains("/shorts/")
+        || l.contains("/reel/")
+        || l.contains("/video")
+        || l.contains(".m3u8")
+        || l.contains(".mpd")
+        || l.contains(".mp4")
+        || l.contains(".ts")
+}
+
+/// Any valid web URL (used when window/tab title actually matches the playing media title).
+fn is_web_url(u: &str) -> bool {
+    if is_browser_internal(u) {
+        return false;
+    }
+    let l = u.trim().to_lowercase();
+    (l.contains('.') && !l.contains(' ')) || l.starts_with("http://") || l.starts_with("https://")
 }
 
 /// Whitespace runs to one space, trimmed, lower case.
 fn norm(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+fn title_matches(haystack: &str, want: &str) -> bool {
+    if want.is_empty() || haystack.is_empty() {
+        return false;
+    }
+    let h = norm(haystack);
+    let w = norm(want);
+    if h.contains(&w) {
+        return true;
+    }
+    // Browsers sometimes truncate long titles in the tab bar — match on a meaningful prefix (>= 16 chars)
+    let prefix: String = w.chars().take(32).collect();
+    prefix.chars().count() >= 16 && h.contains(&prefix)
 }
 
 fn json(url: &str, how: &str) -> String {
@@ -83,24 +130,83 @@ struct Uia {
 }
 
 impl Uia {
-    fn cond_type(&self, t: UIA_CONTROLTYPE_ID) -> Option<IUIAutomationCondition> {
-        unsafe { self.a.CreatePropertyCondition(UIA_ControlTypePropertyId, &VARIANT::from(t.0)).ok() }
-    }
-    fn url_of(&self, w: &IUIAutomationElement) -> String {
-        unsafe {
-            let Some(c) = self.cond_type(UIA_EditControlTypeId) else { return String::new() };
-            w.FindFirst(TreeScope_Descendants, &c)
-                .and_then(|e| e.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId))
-                .and_then(|p| p.CurrentValue())
-                .map(|b| b.to_string())
-                .unwrap_or_default()
-        }
-    }
     fn all(&self, w: &IUIAutomationElement, scope: TreeScope, c: &IUIAutomationCondition) -> Vec<IUIAutomationElement> {
         unsafe {
             let Ok(arr) = w.FindAll(scope, c) else { return vec![] };
             (0..arr.Length().unwrap_or(0)).filter_map(|i| arr.GetElement(i).ok()).collect()
         }
+    }
+
+    /// Breadth-first search through the browser's own frame ONLY — skips `UIA_DocumentControlTypeId`
+    /// so heavy web pages are never traversed. Much faster than TreeScope_Descendants.
+    fn bfs_chrome<F>(&self, root: &IUIAutomationElement, max_nodes: usize, mut visitor: F)
+    where
+        F: FnMut(&IUIAutomationElement, i32) -> bool,
+    {
+        unsafe {
+            let Ok(walker) = self.a.ControlViewWalker() else { return };
+            let mut q = VecDeque::new();
+            q.push_back(root.clone());
+            let mut seen = 0;
+            while let Some(el) = q.pop_front() {
+                seen += 1;
+                if seen > max_nodes {
+                    break;
+                }
+                let ct = el.CurrentControlType().map(|c| c.0).unwrap_or(0);
+                if ct == UIA_DocumentControlTypeId.0 {
+                    continue;
+                }
+                if !visitor(&el, ct) {
+                    break;
+                }
+                if let Ok(mut child) = walker.GetFirstChildElement(&el) {
+                    loop {
+                        let c_ct = child.CurrentControlType().map(|c| c.0).unwrap_or(0);
+                        if c_ct != UIA_DocumentControlTypeId.0 {
+                            q.push_back(child.clone());
+                        }
+                        match walker.GetNextSiblingElement(&child) {
+                            Ok(next) => child = next,
+                            Err(_) => break,
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn url_of(&self, w: &IUIAutomationElement) -> String {
+        let mut found = String::new();
+        self.bfs_chrome(w, 450, |el, ct| {
+            if ct == UIA_EditControlTypeId.0 {
+                unsafe {
+                    if let Ok(pat) = el.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) {
+                        if let Ok(val) = pat.CurrentValue() {
+                            let s = val.to_string();
+                            let wide = el.CurrentBoundingRectangle().map(|r| r.right - r.left >= 180).unwrap_or(true);
+                            if wide && !s.is_empty() {
+                                found = s;
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+            true
+        });
+        found
+    }
+
+    fn tabs_of(&self, w: &IUIAutomationElement) -> Vec<IUIAutomationElement> {
+        let mut out = Vec::new();
+        self.bfs_chrome(w, 600, |el, ct| {
+            if ct == UIA_TabItemControlTypeId.0 {
+                out.push(el.clone());
+            }
+            true
+        });
+        out
     }
 }
 
@@ -109,19 +215,34 @@ fn name(e: &IUIAutomationElement) -> String {
 }
 
 fn selected(tab: &IUIAutomationElement) -> bool {
-    unsafe { tab.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).and_then(|p| p.CurrentIsSelected()).map(|b| b.as_bool()).unwrap_or(false) }
+    unsafe {
+        tab.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId)
+            .and_then(|p| p.CurrentIsSelected())
+            .map(|b| b.as_bool())
+            .unwrap_or(false)
+    }
 }
 
-fn find(proc: &str, title: &str) -> String {
+fn find(proc: &str, title: &str, allow_tab_switch: bool) -> String {
     let want = norm(title);
     let pids = pids_of(proc);
     if pids.is_empty() {
         return json("", "no-browser");
     }
-    let Ok(a) = (unsafe { CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }) else { return json("", "not-found") };
+    let Ok(a) = (unsafe { CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) }) else {
+        return json("", "not-found");
+    };
+    if let Ok(u2) = windows::core::Interface::cast::<IUIAutomation2>(&a) {
+        unsafe {
+            let _ = u2.SetConnectionTimeout(800);
+            let _ = u2.SetTransactionTimeout(800);
+        }
+    }
     let u = Uia { a };
     let Ok(root) = (unsafe { u.a.GetRootElement() }) else { return json("", "not-found") };
-    let Ok(cls) = (unsafe { u.a.CreatePropertyCondition(UIA_ClassNamePropertyId, &VARIANT::from(BSTR::from("Chrome_WidgetWin_1"))) }) else { return json("", "not-found") };
+    let Ok(cls) = (unsafe { u.a.CreatePropertyCondition(UIA_ClassNamePropertyId, &VARIANT::from(BSTR::from("Chrome_WidgetWin_1"))) }) else {
+        return json("", "not-found");
+    };
     let mut windows: Vec<(IUIAutomationElement, String)> = u
         .all(&root, TreeScope_Children, &cls)
         .into_iter()
@@ -132,27 +253,33 @@ fn find(proc: &str, title: &str) -> String {
         })
         .filter(|(_, n)| !n.is_empty())
         .collect();
-    // windows whose title contains the video title first (a stable sort, like OrderBy)
-    windows.sort_by_key(|(_, n)| if !want.is_empty() && norm(n).contains(&want) { 0 } else { 1 });
+    // windows whose title contains the video title first
+    windows.sort_by_key(|(_, n)| if title_matches(n, &want) { 0 } else { 1 });
 
+    // 1. Check active windows whose title matches (or when no title filter was requested)
     for (w, n) in &windows {
-        let url = u.url_of(w);
-        if is_video(&url) && (want.is_empty() || norm(n).contains(&want) || windows.len() == 1) {
-            return json(&url, "address-bar");
+        let matched = title_matches(n, &want);
+        if matched || want.is_empty() {
+            let url = u.url_of(w);
+            if is_web_url(&url) {
+                return json(&url, "address-bar");
+            }
         }
     }
-    // not the active tab: select it, read, restore
-    if !want.is_empty() {
-        let Some(tab_cond) = u.cond_type(UIA_TabItemControlTypeId) else { return json("", "not-found") };
+
+    // 2. If allowed, check background tabs matching title BEFORE falling back to an unrelated active tab
+    if allow_tab_switch && !want.is_empty() {
         for (w, _) in &windows {
-            let tabs = u.all(w, TreeScope_Descendants, &tab_cond);
-            let Some(target) = tabs.iter().find(|t| norm(&name(t)).contains(&want)) else { continue };
+            let tabs = u.tabs_of(w);
+            let Some(target) = tabs.iter().find(|t| title_matches(&name(t), &want)) else { continue };
             let prev = tabs.iter().find(|t| selected(t));
-            let select = |t: &IUIAutomationElement| unsafe { t.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).and_then(|p| p.Select()) };
+            let select = |t: &IUIAutomationElement| unsafe {
+                t.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId).and_then(|p| p.Select())
+            };
             if select(target).is_err() {
                 continue;
             }
-            std::thread::sleep(Duration::from_millis(250));
+            std::thread::sleep(Duration::from_millis(200));
             let url = u.url_of(w);
             if let Some(prev) = prev {
                 let same = unsafe { u.a.CompareElements(prev, target) }.map(|b| b.as_bool()).unwrap_or(false);
@@ -160,29 +287,44 @@ fn find(proc: &str, title: &str) -> String {
                     let _ = select(prev);
                 }
             }
-            if is_video(&url) {
+            if is_web_url(&url) {
                 return json(&url, "tab");
             }
         }
     }
-    // last resort: any window showing a video
+
+    // 3. Check if an active window is already on a known video site (e.g. TikTok/Reels where tab title differs from media)
     for (w, _) in &windows {
         let url = u.url_of(w);
-        if is_video(&url) {
+        if is_known_video(&url) {
+            return json(&url, "address-bar");
+        }
+    }
+
+    // 3. Final active-tab fallback ONLY if allow_tab_switch (user explicitly clicked) & only 1 window
+    if allow_tab_switch && windows.len() == 1 {
+        let url = u.url_of(&windows[0].0);
+        if is_web_url(&url) {
             return json(&url, "any");
         }
     }
+
     json("", "not-found")
 }
 
 /// {"url","how"} for the video `title` playing in browser `proc` ("chrome", "msedge", ...).
 pub fn yt_url(proc: &str, title: &str) -> String {
+    yt_url_opts(proc, title, true)
+}
+
+/// Variant letting passive callers skip tab-switching side effects.
+pub fn yt_url_opts(proc: &str, title: &str, allow_tab_switch: bool) -> String {
     let (proc, title) = (proc.to_string(), title.to_string());
     std::thread::spawn(move || {
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
-        find(&proc, &title)
+        find(&proc, &title, allow_tab_switch)
     })
     .join()
     .unwrap_or_else(|_| json("", "not-found"))

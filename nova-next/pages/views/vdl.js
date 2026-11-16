@@ -1,9 +1,4 @@
 // Video Downloader (MDM) UI controller for Nova Island — v1.8.8
-// Improvements:
-//   • فور الضغط يظهر "جاري البحث عن الجودات…" مع spinner على الزر
-//   • لما تبعد الماوس وفيه probe جاهز: flash على الجزيرة + toast "جودات جاهزة"
-//   • pre-probe تلقائي بعد 2 ثانية من بداية تشغيل الميديا (بكرة عشان تلقى الجودات جاهزة فور الضغط)
-//   • إصلاح window size glitch عند فتح/إغلاق الـ drawer (يبلغ عن الحجم بعد الانيميشن)
 (() => {
   const $ = (s) => document.querySelector(s);
   const bridge = window.nova || window.bridge;
@@ -14,24 +9,38 @@
   let vdlNote = null;
   let vdlTimer = null;
   let vdlProbeData = null;
-  let vdlPrefetching = false;
-  let vdlPrefetched = false;
+  let vdlProbeKey = '';
   let vdlProbeTime = 0;
-  let vdlHoverTimer = null;
+  let vdlInFlight = null;
   let vdlAutoProbeTimer = null;
+  let vdlHoverTimer = null;
+  let probeSeq = 0;
   let lastTrackKey = '';
-  // Active download ID (for cancel support when backend provides it)
+  let vdlWantsOpenAfterProbe = false;
   let activeDownloadId = null;
 
   function getState() {
     return window.state || { media: { has: false } };
   }
 
+  function trackKeyOf(m) {
+    if (!m || !m.has) return '';
+    return `${m.title || ''}|${m.artist || ''}|${m.app || ''}`;
+  }
+
   function doRender() {
     if (typeof window.render === 'function') window.render();
-    // Always report rect after any layout change to fix size glitch
     if (typeof window.reportRect === 'function') {
       requestAnimationFrame(() => window.reportRect());
+    }
+  }
+
+  function alignDrawer() {
+    const head = $('.media .m-head');
+    const drawer = $('#vdl-drawer');
+    if (head && drawer) {
+      const top = Math.max(44, Math.ceil(head.offsetHeight + 4));
+      drawer.style.top = `${top}px`;
     }
   }
 
@@ -45,27 +54,46 @@
     return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
   }
 
-  function vdlShow(text, kind = '') {
+  function clearVdlNote() {
+    clearTimeout(vdlTimer);
+    vdlNote = null;
+    window.__vdlNote = null;
+    const el = $('#m-artist');
+    if (el) {
+      el.classList.remove('err', 'ok');
+      const m = getState().media;
+      el.textContent = m?.has ? m.artist || m.album || m.app || '' : '';
+    }
+  }
+
+  function vdlShow(text, kind = '', autoClearMs = 4500) {
     const el = $('#m-artist');
     if (!el) return;
     clearTimeout(vdlTimer);
     vdlNote = text;
+    window.__vdlNote = text;
     el.textContent = text;
     el.classList.remove('err', 'ok');
     if (kind) el.classList.add(kind);
-    if (kind) {
-      vdlTimer = setTimeout(() => {
-        vdlNote = null;
-        el.classList.remove('err', 'ok');
-        const m = getState().media;
-        el.textContent = m?.has ? m.artist || m.album || m.app || '' : '';
-      }, 4500);
+    if (kind && autoClearMs > 0) {
+      vdlTimer = setTimeout(clearVdlNote, autoClearMs);
     }
   }
 
-  function notifyQualitiesReady(res) {
+  function clearVdlToast() {
+    const st = getState();
+    if (st.toast && String(st.toast).startsWith('vdl-')) {
+      st.toast = '';
+      st.toastUntil = 0;
+      st.toastAction = null;
+      if (typeof window.render === 'function') window.render();
+    }
+  }
+
+  function notifyQualitiesReady(res, key, seq) {
+    if (seq !== probeSeq || key !== lastTrackKey) return;
     vdlProbeData = res;
-    vdlPrefetched = true;
+    vdlProbeKey = key;
     vdlProbeTime = Date.now();
     const island = document.getElementById('island');
     if (island) {
@@ -77,14 +105,12 @@
     }
     const st = getState();
     st.toastAction = () => {
-      const view = $('#v-media');
-      if (view) {
-        renderVdlChoices(res);
-        view.classList.add('picking');
-        if (typeof window.togglePin === 'function') window.togglePin(true);
-        vdlShow('اختر جودة الفيديو أو MP3');
-        doRender();
-      }
+      if (seq !== probeSeq || key !== lastTrackKey) return;
+      st.toast = '';
+      st.toastUntil = 0;
+      st.toastAction = null;
+      if (typeof window.selectTab === 'function') window.selectTab('media');
+      openVdlPicker(res);
     };
   }
 
@@ -104,63 +130,106 @@
           '</button>';
       }).join('');
     }
-    // Fix window size glitch: report rect after drawer opens (after CSS transition)
+    alignDrawer();
+  }
+
+  function openVdlPicker(data) {
+    const view = $('#v-media');
+    if (!view || !data?.choices?.length) return false;
+    renderVdlChoices(data);
+    view.classList.add('picking');
+    if (typeof window.setVdlHold === 'function') {
+      window.setVdlHold(true);
+    }
+    vdlShow('اختر جودة الفيديو أو MP3', '', 0);
+    doRender();
     setTimeout(() => {
+      alignDrawer();
       if (typeof window.reportRect === 'function') window.reportRect();
-    }, 50);
+    }, 60);
+    return true;
   }
 
   function closeVdlPicker(silent = false) {
+    vdlWantsOpenAfterProbe = false;
     const view = $('#v-media');
-    if (!view || !view.classList.contains('picking')) return;
-    view.classList.remove('picking');
-    if (typeof window.togglePin === 'function') {
-      window.togglePin(false);
+    const wasPicking = !!(view && view.classList.contains('picking'));
+    if (view) view.classList.remove('picking');
+    if (typeof window.setVdlHold === 'function') {
+      window.setVdlHold(false);
     }
-    if (!silent) {
-      clearTimeout(vdlTimer);
-      vdlNote = null;
-      const el = $('#m-artist');
-      if (el) {
-        el.classList.remove('err', 'ok');
-        const m = getState().media;
-        el.textContent = m?.has ? m.artist || m.album || m.app || '' : '';
+    if (!silent) clearVdlNote();
+    if (wasPicking) {
+      doRender();
+      setTimeout(() => {
+        if (typeof window.reportRect === 'function') window.reportRect();
+      }, 380);
+    }
+  }
+
+  function runProbe(m, key, seq, passive) {
+    if (vdlInFlight && vdlInFlight.key === key && vdlInFlight.seq === seq) {
+      if (!passive && vdlInFlight.passive) {
+        return vdlInFlight.promise.then((res) => {
+          if (seq !== probeSeq || key !== lastTrackKey) return null;
+          if (res?.ok && Array.isArray(res.choices) && res.choices.length) return res;
+          return runProbe(m, key, seq, false);
+        });
       }
+      return vdlInFlight.promise;
     }
-    // Fix window size glitch: report rect after drawer closes (after CSS transition ~360ms)
-    setTimeout(() => {
-      if (typeof window.reportRect === 'function') window.reportRect();
-    }, 400);
+
+    const req = {
+      app: m?.app || '',
+      title: m?.title || '',
+      passive: !!passive,
+    };
+    const slot = { key, seq, passive: !!passive, promise: null };
+    const promise = Promise.resolve()
+      .then(() => bridge.videoProbe(req))
+      .catch(() => ({ ok: false, error: 'mdm-error' }))
+      .finally(() => {
+        if (vdlInFlight === slot) vdlInFlight = null;
+      });
+    slot.promise = promise;
+    vdlInFlight = slot;
+    return promise;
   }
 
   async function startVdlChoice(choice) {
     const m = getState().media || {};
     if (!vdlBtn || vdlBtn.classList.contains('busy')) return;
+    const key = lastTrackKey;
+    const seq = probeSeq;
     const probeUrl = vdlProbeData?.url || '';
+    const titleHint = vdlProbeData?.title || m.title || '';
+    const thumbnail = vdlProbeData?.thumbnail || m.art || '';
     closeVdlPicker(true);
     vdlBtn.classList.add('busy');
-    vdlShow(`جاري بدء تحميل ${choice?.label || 'الفيديو'}…`);
+    vdlShow(`جاري بدء تحميل ${choice?.label || 'الفيديو'}…`, '', 0);
     let res;
     try {
       res = await bridge.videoDownload({
         app: m.app || '',
         title: m.title || '',
         url: probeUrl,
+        titleHint,
+        thumbnail,
         choice,
       });
     } catch {
       res = { ok: false, error: 'mdm-error' };
     }
     vdlBtn.classList.remove('busy');
+    if (seq !== probeSeq || key !== lastTrackKey) return;
     if (res?.ok) {
       activeDownloadId = res.id || null;
       vdlBtn.classList.add('done');
       setTimeout(() => vdlBtn.classList.remove('done'), 4000);
-      vdlShow(`جاري تحميل ${res.label || choice?.label || 'الفيديو'} ✓`, 'ok');
-      vdlProbeData = null;
-      vdlPrefetched = false;
+      vdlShow(`بدأ تحميل ${res.label || choice?.label || 'الفيديو'} ✓`, 'ok', 4500);
+      // Keep vdlProbeData so user can re-pick another quality or retry after cancel
     } else {
-      vdlShow(res?.message || 'تعذر بدء تحميل الفيديو', 'err');
+      vdlShow(res?.message || 'تعذر بدء تحميل الفيديو', 'err', 4500);
     }
     doRender();
   }
@@ -174,51 +243,56 @@
     });
   }
 
-  // --- Auto probe: starts 2s after media begins playing (background, silent) ---
-  // هيخلي الجودات تكون جاهزة قبل ما تضغط الزر بكتير
-  function scheduleAutoProbe() {
+  function scheduleAutoProbe(m, key, seq) {
     clearTimeout(vdlAutoProbeTimer);
-    if (vdlPrefetched || vdlPrefetching || vdlProbeData) return;
+    if (!m?.has || (vdlProbeData && vdlProbeKey === key)) return;
     vdlAutoProbeTimer = setTimeout(async () => {
-      const m = getState().media || {};
-      if (!m.has || vdlPrefetching || vdlPrefetched || vdlProbeData) return;
-      vdlPrefetching = true;
-      try {
-        const res = await bridge.videoProbe({ app: m.app || '', title: m.title || '' });
-        if (res?.ok && Array.isArray(res.choices) && res.choices.length) {
-          vdlProbeData = res;
-          vdlPrefetched = true;
-          vdlProbeTime = Date.now();
-          // Flash subtle glow on island pill
-          const island = document.getElementById('island');
-          if (island) {
-            island.classList.add('dl-flash');
-            setTimeout(() => island.classList.remove('dl-flash'), 1800);
-          }
+      if (seq !== probeSeq || key !== lastTrackKey) return;
+      const curM = getState().media || {};
+      if (!curM.has || (vdlProbeData && vdlProbeKey === key)) return;
+      const res = await runProbe(curM, key, seq, true);
+      if (seq !== probeSeq || key !== lastTrackKey) return;
+      if (res?.ok && Array.isArray(res.choices) && res.choices.length) {
+        vdlProbeData = res;
+        vdlProbeKey = key;
+        vdlProbeTime = Date.now();
+        vdlBtn?.classList.add('ready');
+        const island = document.getElementById('island');
+        if (island) {
+          island.classList.add('dl-flash');
+          setTimeout(() => island.classList.remove('dl-flash'), 1600);
         }
-      } catch {}
-      vdlPrefetching = false;
-    }, 2000);
+        if (vdlWantsOpenAfterProbe) {
+          vdlWantsOpenAfterProbe = false;
+          vdlBtn?.classList.remove('busy');
+          const mode = typeof window.currentMode === 'function' ? window.currentMode() : 'expanded';
+          if (mode === 'expanded') openVdlPicker(res);
+          else notifyQualitiesReady(res, key, seq);
+        }
+      }
+    }, 1200);
   }
 
-  // Hover prefetch (kept as backup)
   if (vdlBtn) {
     vdlBtn.addEventListener('mouseenter', () => {
       const m = getState().media || {};
-      if (!m.has || vdlPrefetching || vdlPrefetched || vdlProbeData) return;
+      const key = lastTrackKey;
+      const seq = probeSeq;
+      if (!m.has || (vdlProbeData && vdlProbeKey === key)) return;
+      clearTimeout(vdlHoverTimer);
       vdlHoverTimer = setTimeout(async () => {
-        if (!getState().media?.has || vdlPrefetching || vdlPrefetched) return;
-        vdlPrefetching = true;
-        try {
-          const res = await bridge.videoProbe({ app: m.app || '', title: m.title || '' });
-          if (res?.ok && Array.isArray(res.choices) && res.choices.length) {
-            vdlProbeData = res;
-            vdlPrefetched = true;
-            vdlProbeTime = Date.now();
-          }
-        } catch {}
-        vdlPrefetching = false;
-      }, 300);
+        if (seq !== probeSeq || key !== lastTrackKey) return;
+        const curM = getState().media || {};
+        if (!curM.has || (vdlProbeData && vdlProbeKey === key)) return;
+        const res = await runProbe(curM, key, seq, true);
+        if (seq !== probeSeq || key !== lastTrackKey) return;
+        if (res?.ok && Array.isArray(res.choices) && res.choices.length) {
+          vdlProbeData = res;
+          vdlProbeKey = key;
+          vdlProbeTime = Date.now();
+          vdlBtn.classList.add('ready');
+        }
+      }, 250);
     });
 
     vdlBtn.addEventListener('mouseleave', () => {
@@ -227,111 +301,106 @@
 
     vdlBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      const m = getState().media || {};
-      if (vdlBtn.classList.contains('busy')) return;
-
       const view = $('#v-media');
       if (view && view.classList.contains('picking')) {
-        closeVdlPicker();
+        closeVdlPicker(false);
+        return;
+      }
+      if (vdlBtn.classList.contains('busy')) return;
+
+      const m = getState().media || {};
+      const key = lastTrackKey;
+      const seq = probeSeq;
+
+      if (
+        vdlProbeData &&
+        vdlProbeKey === key &&
+        Array.isArray(vdlProbeData.choices) &&
+        vdlProbeData.choices.length &&
+        Date.now() - vdlProbeTime < 300000
+      ) {
+        openVdlPicker(vdlProbeData);
         return;
       }
 
-      // If we already have fresh probe data -> show instantly!
-      if (vdlProbeData && Array.isArray(vdlProbeData.choices) && vdlProbeData.choices.length && (Date.now() - vdlProbeTime < 300000)) {
-        renderVdlChoices(vdlProbeData);
-        if (view) view.classList.add('picking');
-        if (typeof window.togglePin === 'function') window.togglePin(true);
-        vdlShow('اختر جودة الفيديو أو MP3');
-        doRender();
-        return;
-      }
-
-      // Otherwise probe now — with busy spinner + clear Arabic message
+      vdlWantsOpenAfterProbe = true;
       vdlBtn.classList.add('busy');
-      vdlShow('جاري البحث عن الجودات…');
-      let res;
-      try {
-        res = await bridge.videoProbe({ app: m.app || '', title: m.title || '' });
-      } catch {
-        res = { ok: false, error: 'mdm-error' };
-      }
+      vdlShow('جاري البحث عن الجودات…', '', 0);
+      doRender();
+
+      const res = await runProbe(m, key, seq, false);
+      if (seq !== probeSeq || key !== lastTrackKey) return;
       vdlBtn.classList.remove('busy');
 
       if (res?.ok && Array.isArray(res.choices) && res.choices.length) {
         vdlProbeData = res;
-        vdlPrefetched = true;
+        vdlProbeKey = key;
         vdlProbeTime = Date.now();
-        const currentMode = typeof window.currentMode === 'function' ? window.currentMode() : 'expanded';
-        if (currentMode === 'expanded') {
-          renderVdlChoices(res);
-          if (view) view.classList.add('picking');
-          if (typeof window.togglePin === 'function') window.togglePin(true);
-          vdlShow('اختر جودة الفيديو أو MP3');
+        vdlBtn.classList.add('ready');
+        vdlWantsOpenAfterProbe = false;
+        const mode = typeof window.currentMode === 'function' ? window.currentMode() : 'expanded';
+        if (mode === 'expanded') {
+          openVdlPicker(res);
         } else {
-          notifyQualitiesReady(res);
+          notifyQualitiesReady(res, key, seq);
         }
       } else {
+        vdlWantsOpenAfterProbe = false;
         const errMsg = res?.error === 'no-url'
           ? 'افتح الفيديو في المتصفح أو انسخ رابطه'
           : (res?.message || 'تعذر العثور على جودات الفيديو');
-        vdlShow(errMsg, 'err');
+        vdlShow(errMsg, 'err', 4500);
       }
       doRender();
     });
   }
 
-  // Auto-open qualities drawer if user hovers/expands island while freshly ready
-  window.addEventListener('island:mode', (e) => {
-    if (
-      e.detail?.mode === 'expanded' &&
-      vdlProbeData?.choices?.length &&
-      vdlPrefetched &&
-      !$('#v-media')?.classList.contains('picking') &&
-      Date.now() - vdlProbeTime < 45000
-    ) {
-      const view = $('#v-media');
-      if (view) {
-        renderVdlChoices(vdlProbeData);
-        view.classList.add('picking');
-        if (typeof window.togglePin === 'function') window.togglePin(true);
-        vdlShow('اختر جودة الفيديو أو MP3');
-      }
-    }
-    // Fix window size on any mode change
+  window.addEventListener('island:mode', () => {
     setTimeout(() => {
       if (typeof window.reportRect === 'function') window.reportRect();
     }, 100);
   });
 
-  // Only close picker when the actual TRACK changes (title/artist/app change),
-  // NEVER on periodic media playback ticks!
   if (bridge && typeof bridge.onMedia === 'function') {
     bridge.onMedia((m) => {
-      const key = `${m?.title || ''}|${m?.artist || ''}|${m?.app || ''}`;
+      const key = trackKeyOf(m);
       if (key !== lastTrackKey) {
         lastTrackKey = key;
-        closeVdlPicker(true);
+        probeSeq += 1;
+        const seq = probeSeq;
+        clearTimeout(vdlAutoProbeTimer);
+        clearTimeout(vdlHoverTimer);
+        vdlInFlight = null;
         vdlProbeData = null;
-        vdlPrefetched = false;
-        vdlPrefetching = false;
+        vdlProbeKey = '';
+        vdlProbeTime = 0;
+        vdlWantsOpenAfterProbe = false;
         activeDownloadId = null;
-        // Auto-probe when new track starts playing
-        if (m?.has) scheduleAutoProbe();
+        if (vdlList) vdlList.innerHTML = '';
+        vdlBtn?.classList.remove('busy', 'ready', 'done');
+        closeVdlPicker(true);
+        clearVdlNote();
+        clearVdlToast();
+        if (m?.has) scheduleAutoProbe(m, key, seq);
       }
     });
   }
 
   if (bridge && typeof bridge.onVideoDl === 'function') {
     bridge.onVideoDl((d) => {
+      const view = $('#v-media');
+      if (view && view.classList.contains('picking')) return;
+      if (d?.id && activeDownloadId && d.id !== activeDownloadId) return;
       if (d?.pct != null) {
-        vdlShow(`جاري التحميل ${Math.round(d.pct)}%`);
+        vdlShow(`جاري التحميل ${Math.round(d.pct)}%`, '', 0);
       } else if (d?.done) {
-        vdlShow('اكتمل التحميل بنجاح ✓', 'ok');
+        activeDownloadId = null;
+        vdlShow('اكتمل التحميل بنجاح ✓', 'ok', 4500);
         vdlBtn?.classList.remove('busy');
         vdlBtn?.classList.add('done');
         setTimeout(() => vdlBtn?.classList.remove('done'), 4000);
       } else if (d?.text) {
-        vdlShow(String(d.text));
+        vdlShow(String(d.text), '', 0);
       }
     });
   }
