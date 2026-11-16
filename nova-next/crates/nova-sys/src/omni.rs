@@ -39,8 +39,9 @@ impl Omni {
 
     /// JSON for the status line, or "null" when no browser address bar is in front.
     pub fn json(&mut self, fg: HWND, proc: &str, fullscreen: bool) -> String {
-        const BROWSERS: &[&str] = &["chrome", "msedge", "brave", "opera", "vivaldi"];
-        if fullscreen || fg.is_invalid() || !BROWSERS.contains(&proc.to_lowercase().as_str()) || crate::win::class_of(fg) != "Chrome_WidgetWin_1" {
+        const BROWSERS: &[&str] = &["chrome", "msedge", "edge", "brave", "opera", "vivaldi", "arc"];
+        let proc_l = proc.to_lowercase();
+        if fullscreen || fg.is_invalid() || !BROWSERS.iter().any(|b| proc_l.contains(b)) || crate::win::class_of(fg) != "Chrome_WidgetWin_1" {
             self.hwnd = HWND::default();
             self.edit = None;
             return "null".into();
@@ -78,7 +79,7 @@ impl Omni {
         }
     }
 
-    fn read(&self) -> Option<String> {
+    fn read(&mut self) -> Option<String> {
         let e = self.edit.as_ref()?;
         unsafe {
             let r = e.CurrentBoundingRectangle().ok()?;
@@ -87,6 +88,7 @@ impl Omni {
                 return Some("null".into());
             }
             if w < 200 || h < 16 {
+                self.edit = None;
                 return Some("null".into());
             }
             let focus = e.CurrentHasKeyboardFocus().ok()?.as_bool();

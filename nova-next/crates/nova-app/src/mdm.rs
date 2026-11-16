@@ -8,13 +8,27 @@ use std::{
 use serde_json::{json, Value};
 
 pub fn find_ytdlp(data_dir: &Path) -> Option<PathBuf> {
-    // 1. in data_dir/tools
+    // 1. Beside running exe or in exe's tools subfolder
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p1 = dir.join("yt-dlp.exe");
+            if p1.is_file() {
+                return Some(p1);
+            }
+            let p2 = dir.join("tools").join("yt-dlp.exe");
+            if p2.is_file() {
+                return Some(p2);
+            }
+        }
+    }
+
+    // 2. in data_dir/tools
     let local = data_dir.join("tools").join("yt-dlp.exe");
     if local.is_file() {
         return Some(local);
     }
 
-    // 2. in WinGet links
+    // 3. in WinGet links
     if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
         let p = PathBuf::from(&local_app).join("Microsoft").join("WinGet").join("Links").join("yt-dlp.exe");
         if p.is_file() {
@@ -22,10 +36,59 @@ pub fn find_ytdlp(data_dir: &Path) -> Option<PathBuf> {
         }
     }
 
-    // 3. in PATH
+    // 4. in PATH
     if let Ok(path_var) = std::env::var("PATH") {
         for dir in std::env::split_paths(&path_var) {
             let p = dir.join("yt-dlp.exe");
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+
+    None
+}
+
+pub fn find_ffmpeg(data_dir: &Path) -> Option<PathBuf> {
+    // 1. Beside running exe or in tools
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p1 = dir.join("ffmpeg.exe");
+            if p1.is_file() {
+                return Some(p1);
+            }
+            let p2 = dir.join("tools").join("ffmpeg.exe");
+            if p2.is_file() {
+                return Some(p2);
+            }
+        }
+    }
+
+    // 2. In data_dir/tools
+    let local = data_dir.join("tools").join("ffmpeg.exe");
+    if local.is_file() {
+        return Some(local);
+    }
+
+    // 3. In common app directories
+    if let Ok(local_app) = std::env::var("LOCALAPPDATA") {
+        let la = PathBuf::from(&local_app);
+        for sub in &[
+            "CapCut\\Apps\\4.6.0.1754",
+            "Filee\\engines\\ffmpeg\\bin",
+            "hermes\\tools\\ffmpeg-9.0.1-win32-x64\\bin",
+        ] {
+            let p = la.join(sub).join("ffmpeg.exe");
+            if p.is_file() {
+                return Some(p);
+            }
+        }
+    }
+
+    // 4. in PATH
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let p = dir.join("ffmpeg.exe");
             if p.is_file() {
                 return Some(p);
             }
@@ -57,18 +120,71 @@ pub fn ensure_ytdlp(data_dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Resolves URL from request or browser window via UI Automation.
+/// Resolves URL from request, browser window, foreground window, or clipboard.
 pub fn resolve_url(req: &Value) -> Option<String> {
-    if let Some(u) = req["url"].as_str().filter(|s| s.starts_with("http://") || s.starts_with("https://")) {
-        return Some(u.trim().to_string());
+    // 1. Direct url parameter
+    if let Some(u) = req["url"].as_str().filter(|s| !s.trim().is_empty()) {
+        let trimmed = u.trim();
+        let full = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            trimmed.to_string()
+        } else {
+            format!("https://{trimmed}")
+        };
+        return Some(full);
     }
 
+    // 2. SMTC app & title match
     let app_id = req["app"].as_str().unwrap_or("");
-    let proc = crate::mini::browser_proc(app_id)?;
-    let title = req["title"].as_str().unwrap_or("");
-    let short: String = title.chars().take(200).collect();
-    let r: Value = serde_json::from_str(&nova_sys::yturl::yt_url(proc, &short)).unwrap_or_default();
-    r["url"].as_str().filter(|s| s.starts_with("http://") || s.starts_with("https://")).map(|s| s.to_string())
+    if let Some(proc) = crate::mini::browser_proc(app_id) {
+        let title = req["title"].as_str().unwrap_or("");
+        let short: String = title.chars().take(200).collect();
+        let r: Value = serde_json::from_str(&nova_sys::yturl::yt_url(proc, &short)).unwrap_or_default();
+        if let Some(u) = r["url"].as_str().filter(|s| !s.trim().is_empty()) {
+            let trimmed = u.trim();
+            let full = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                trimmed.to_string()
+            } else {
+                format!("https://{trimmed}")
+            };
+            return Some(full);
+        }
+    }
+
+    // 3. Fallback: foreground window if it is a browser
+    let (fg_proc, _) = nova_sys::win::foreground_info();
+    let fg_proc_l = fg_proc.to_lowercase();
+    if ["chrome", "msedge", "edge", "brave", "opera", "vivaldi"].iter().any(|b| fg_proc_l.contains(b)) {
+        let r: Value = serde_json::from_str(&nova_sys::yturl::yt_url(&fg_proc, "")).unwrap_or_default();
+        if let Some(u) = r["url"].as_str().filter(|s| !s.trim().is_empty()) {
+            let trimmed = u.trim();
+            let full = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                trimmed.to_string()
+            } else {
+                format!("https://{trimmed}")
+            };
+            return Some(full);
+        }
+    }
+
+    // 4. Fallback: check clipboard for any video/web link
+    let clip_text = nova_sys::clip::read_text();
+    let trimmed = clip_text.trim();
+    if (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+        && (trimmed.contains("youtube")
+            || trimmed.contains("youtu.be")
+            || trimmed.contains("facebook")
+            || trimmed.contains("tiktok")
+            || trimmed.contains("instagram")
+            || trimmed.contains("twitter")
+            || trimmed.contains("x.com")
+            || trimmed.contains("vimeo")
+            || trimmed.contains(".mp4")
+            || trimmed.contains(".m3u8"))
+    {
+        return Some(trimmed.to_string());
+    }
+
+    None
 }
 
 /// Probes a video URL and returns available qualities.
@@ -84,7 +200,7 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
 
     // Run yt-dlp -J --no-playlist
     let mut cmd = Command::new(&ytdlp);
-    cmd.args(["-J", "--no-playlist", "--socket-timeout", "15", &url]);
+    cmd.args(["-J", "--no-playlist", "--socket-timeout", "20", &url]);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -107,7 +223,6 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
     // Build format choices
     let mut choices = Vec::new();
 
-    // Check what heights are available
     let mut has_1080 = false;
     let mut has_720 = false;
     let mut has_480 = false;
@@ -122,7 +237,6 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
         }
     }
 
-    // Estimate file sizes from duration if available (~3MB/min for 1080p, ~1.8MB/min for 720p, ~0.8MB/min for 480p, ~2.4MB/min for 320k)
     let dur_min = (duration / 60.0).max(1.0);
 
     if has_1080 {
@@ -201,22 +315,36 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
 
     let mut args = Vec::new();
     args.push("--no-playlist".to_string());
+    args.push("--windows-filenames".to_string());
     args.push("-o".to_string());
     args.push(template);
 
+    let ffmpeg = find_ffmpeg(data_dir);
+    if let Some(ff) = &ffmpeg {
+        if let Some(dir) = ff.parent() {
+            args.push("--ffmpeg-location".to_string());
+            args.push(dir.to_string_lossy().into_owned());
+        }
+    }
+
     if kind == "audio" {
-        args.push("-x".to_string());
-        args.push("--audio-format".to_string());
-        args.push("mp3".to_string());
-        args.push("--audio-quality".to_string());
-        args.push("0".to_string());
-        args.push("--embed-thumbnail".to_string());
-        args.push("--add-metadata".to_string());
+        if ffmpeg.is_some() {
+            args.push("-x".to_string());
+            args.push("--audio-format".to_string());
+            args.push("mp3".to_string());
+            args.push("--audio-quality".to_string());
+            args.push("0".to_string());
+        } else {
+            args.push("-f".to_string());
+            args.push("bestaudio[ext=m4a]/bestaudio/best".to_string());
+        }
     } else {
         args.push("-f".to_string());
-        args.push(format_id.to_string());
-        args.push("--merge-output-format".to_string());
-        args.push("mp4".to_string());
+        args.push(format!("{format_id}/best"));
+        if ffmpeg.is_some() {
+            args.push("--merge-output-format".to_string());
+            args.push("mp4".to_string());
+        }
     }
 
     args.push(url);

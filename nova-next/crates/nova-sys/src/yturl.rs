@@ -21,7 +21,24 @@ use windows::{
 
 fn is_video(u: &str) -> bool {
     let l = u.to_lowercase();
-    ["youtube.com/watch", "youtube.com/shorts/", "youtube.com/live/", "youtube.com/embed/", "youtu.be/"].iter().any(|p| l.contains(p))
+    let l = l.trim();
+    if l.is_empty() || l.starts_with("chrome://") || l.starts_with("edge://") || l.starts_with("about:") || l.starts_with("brave://") {
+        return false;
+    }
+    l.contains("youtube.com")
+        || l.contains("youtu.be")
+        || l.contains("facebook.com")
+        || l.contains("tiktok.com")
+        || l.contains("instagram.com")
+        || l.contains("twitter.com")
+        || l.contains("x.com")
+        || l.contains("vimeo.com")
+        || l.contains("dailymotion.com")
+        || l.contains("soundcloud.com")
+        || l.contains("watch")
+        || l.contains("video")
+        || l.contains(".")
+        || l.starts_with("http")
 }
 
 /// Whitespace runs to one space, trimmed, lower case.
@@ -30,7 +47,15 @@ fn norm(s: &str) -> String {
 }
 
 fn json(url: &str, how: &str) -> String {
-    format!("{{\"url\":\"{}\",\"how\":\"{how}\"}}", url.replace('\\', "\\\\").replace('"', "\\\""))
+    let u = url.trim();
+    let full = if u.is_empty() {
+        String::new()
+    } else if u.starts_with("http://") || u.starts_with("https://") {
+        u.to_string()
+    } else {
+        format!("https://{u}")
+    };
+    format!("{{\"url\":\"{}\",\"how\":\"{how}\"}}", full.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn pids_of(proc: &str) -> HashSet<u32> {

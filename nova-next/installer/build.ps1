@@ -38,16 +38,29 @@ if (-not $makensis) { throw 'NSIS 3 (makensis.exe) not found: install it from ns
 New-Item -ItemType Directory -Force "$target\dist" | Out-Null
 $dll = "$target\release\WebView2Loader.dll"
 if (-not (Test-Path $dll)) {
-  $foundDll = Get-ChildItem -Path "$target" -Recurse -Filter "WebView2Loader.dll" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
-  if ($foundDll) { Copy-Item $foundDll.FullName $dll -Force }
+  $srcDll = "$next\crates\webview2-com-sys\x64\WebView2Loader.dll"
+  if (Test-Path $srcDll) {
+    Copy-Item $srcDll $dll -Force
+  } else {
+    $foundDll = Get-ChildItem -Path "$next" -Recurse -Filter "WebView2Loader.dll" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+    if ($foundDll) { Copy-Item $foundDll.FullName $dll -Force }
+  }
+}
+$ytdlp = "$target\release\tools\yt-dlp.exe"
+if (-not (Test-Path $ytdlp)) {
+  $foundYt = "$env:APPDATA\dynamic-nova\tools\yt-dlp.exe"
+  if (Test-Path $foundYt) {
+    New-Item -ItemType Directory -Force "$target\release\tools" | Out-Null
+    Copy-Item $foundYt $ytdlp -Force
+  }
 }
 $out = "$target\dist\Nova-Island-Setup-$version.exe"
 $outPortable = "$target\dist\Nova-Island-$version-Portable.exe"
 $icon = (Split-Path -Parent $next) + "\build\icon.ico"
 Push-Location "$here\nsis"
-& $makensis /V2 "/DVERSION=$version" "/DEXE=$target\release\nova-island.exe" "/DDLL=$dll" "/DOUT=$out" nova-island.nsi
+& $makensis /V2 "/DVERSION=$version" "/DEXE=$target\release\nova-island.exe" "/DDLL=$dll" "/DYTDLP=$ytdlp" "/DOUT=$out" nova-island.nsi
 if ($LASTEXITCODE) { throw 'makensis setup failed' }
-& $makensis /V2 "/DVERSION=$version" "/DEXE=$target\release\nova-island.exe" "/DDLL=$dll" "/DICON=$icon" "/DOUT=$outPortable" portable.nsi
+& $makensis /V2 "/DVERSION=$version" "/DEXE=$target\release\nova-island.exe" "/DDLL=$dll" "/DYTDLP=$ytdlp" "/DICON=$icon" "/DOUT=$outPortable" portable.nsi
 if ($LASTEXITCODE) { throw 'makensis portable failed' }
 Pop-Location
 

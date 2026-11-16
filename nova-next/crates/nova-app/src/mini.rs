@@ -411,12 +411,24 @@ const BROWSER_PROCS: &[&str] = &["chrome", "msedge", "brave", "vivaldi", "opera"
 
 pub fn browser_proc(app_id: &str) -> Option<&'static str> {
     let id = app_id.to_lowercase();
-    BROWSER_PROCS.iter().find(|p| id.contains(*p)).copied()
+    if id.contains("chrome") {
+        Some("chrome")
+    } else if id.contains("edge") || id.contains("msedge") {
+        Some("msedge")
+    } else if id.contains("brave") {
+        Some("brave")
+    } else if id.contains("vivaldi") {
+        Some("vivaldi")
+    } else if id.contains("opera") {
+        Some("opera")
+    } else {
+        None
+    }
 }
 
-/// /^[\w.!-]+$/
+/// /^[\w.!\s-]+$/
 pub fn app_id_ok(id: &str) -> bool {
-    !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'!' | b'-'))
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'!' | b'-' | b' '))
 }
 
 /// /(?:[?&]v=|youtu\.be\/|\/shorts\/|\/live\/|\/embed\/)([\w-]{11})/

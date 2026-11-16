@@ -139,7 +139,7 @@ impl Core {
     // While a Chromium browser is in front the island takes the right third of its address bar.
     // Only from the island's default place: never while vertical or after the user put it somewhere.
     pub fn omni_allowed(&self) -> bool {
-        self.features.bool("addrIsland") && !self.vertical() && !self.pref_bool("placed")
+        self.features.bool("addrIsland") && !self.vertical()
     }
 
     pub fn on_omni(&mut self, o: &Value) {

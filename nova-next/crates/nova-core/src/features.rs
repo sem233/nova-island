@@ -40,10 +40,9 @@ pub fn defaults() -> Map<String, Value> {
         // window
         ("hideFullscreen", json!(true)),
         ("autoUpdate", json!(true)), // download new versions from GitHub and offer a restart on the island
-        // take the right third of the browser's address bar (1.8.7: off Settings, and turned into
-        // the thin line on load; the code stays until it's removed for good)
-        ("addrIsland", json!(false)),
-        ("browserLine", json!(true)),   // (1.8.7) a thin line over the browser's tabs (the default); off: stay in place
+        // take the right third of the browser's address bar
+        ("addrIsland", json!(true)),
+        ("browserLine", json!(false)),
         ("taskbarStrip", json!(false)), // (1.8.7) the Nova strip on the taskbar (display only)
         // performance (the battery saver turns all three on while the battery is low)
         ("noBlur", json!(false)), // solid island, no screen capture at all
@@ -164,10 +163,6 @@ fn settle(values: &mut Map<String, Value>) {
     }
     // the taskbar strip: "Coming soon" in Settings, off until it ships
     values.insert("taskbarStrip".into(), json!(false));
-    if values.get("addrIsland") == Some(&json!(true)) {
-        values.insert("addrIsland".into(), json!(false));
-        values.insert("browserLine".into(), json!(true));
-    }
 }
 
 pub struct Features {

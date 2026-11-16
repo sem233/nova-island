@@ -45,17 +45,17 @@
   }
 
   async function startVdlChoice(choice) {
-    const m = getState().media;
-    if (!m?.has || !vdlBtn || vdlBtn.classList.contains('busy')) return;
+    const m = getState().media || {};
+    if (!vdlBtn || vdlBtn.classList.contains('busy')) return;
     const probeUrl = vdlProbeData?.url || '';
     closeVdlPicker(true);
     vdlBtn.classList.add('busy');
-    vdlShow(`Starting ${choice?.label || 'download'}…`);
+    vdlShow(`بدء تحميل ${choice?.label || 'الفيديو'}…`);
     let res;
     try {
       res = await bridge.videoDownload({
-        app: m.app,
-        title: m.title,
+        app: m.app || '',
+        title: m.title || '',
         url: probeUrl,
         choice,
       });
@@ -66,10 +66,10 @@
     if (res?.ok) {
       vdlBtn.classList.add('done');
       setTimeout(() => vdlBtn.classList.remove('done'), 4000);
-      vdlShow(`Downloading ${res.label || choice?.label || 'video'} ✓`, 'ok');
+      vdlShow(`جاري تحميل ${res.label || choice?.label || 'الفيديو'} بنجاح ✓`, 'ok');
       vdlProbeData = null;
     } else {
-      vdlShow(res?.message || "Couldn't download this video", 'err');
+      vdlShow(res?.message || 'تعذر بدء تحميل الفيديو', 'err');
     }
     doRender();
   }
@@ -119,8 +119,8 @@
 
   if (vdlBtn) {
     vdlBtn.addEventListener('click', async () => {
-      const m = getState().media;
-      if (!m?.has || vdlBtn.classList.contains('busy')) return;
+      const m = getState().media || {};
+      if (vdlBtn.classList.contains('busy')) return;
       const view = $('#v-media');
       if (view && view.classList.contains('picking')) {
         closeVdlPicker();
@@ -134,10 +134,10 @@
         return;
       }
       vdlBtn.classList.add('busy');
-      vdlShow('جاري فحص الجودات…');
+      vdlShow('جاري فحص رابط وجودات الفيديو…');
       let res;
       try {
-        res = await bridge.videoProbe({ app: m.app, title: m.title });
+        res = await bridge.videoProbe({ app: m.app || '', title: m.title || '' });
       } catch {
         res = { ok: false, error: 'mdm-error' };
       }
@@ -148,7 +148,10 @@
         if (view) view.classList.add('picking');
         vdlShow('اختر جودة الفيديو أو MP3');
       } else {
-        vdlShow(res?.message || "Couldn't read video qualities", 'err');
+        const errMsg = res?.error === 'no-url'
+          ? 'افتح الفيديو في المتصفح أو انسخ رابطه'
+          : (res?.message || 'تعذر العثور على جودات الفيديو');
+        vdlShow(errMsg, 'err');
       }
       doRender();
     });

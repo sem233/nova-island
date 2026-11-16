@@ -224,6 +224,8 @@ Section "Install"
     Abort
   ${EndIf}
   File "${DLL}"
+  CreateDirectory "$INSTDIR\tools"
+  File "/oname=$INSTDIR\tools\yt-dlp.exe" "${YTDLP}"
   WriteUninstaller "$INSTDIR\Uninstall ${APP}.exe"
 
   ; Installed apps
@@ -273,6 +275,8 @@ Section "Uninstall"
   !insertmacro CloseApp
   Delete "$INSTDIR\${APP}.exe"
   Delete "$INSTDIR\WebView2Loader.dll"
+  Delete "$INSTDIR\tools\yt-dlp.exe"
+  RMDir "$INSTDIR\tools"
   Delete "$INSTDIR\Uninstall ${APP}.exe"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APP}.lnk"

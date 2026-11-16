@@ -20,5 +20,7 @@ Section
   SetOutPath "$PLUGINSDIR"
   File "/oname=Nova Island.exe" "${EXE}"
   File "${DLL}"
+  CreateDirectory "$PLUGINSDIR\tools"
+  File "/oname=$PLUGINSDIR\tools\yt-dlp.exe" "${YTDLP}"
   ExecWait '"$PLUGINSDIR\Nova Island.exe"'
 SectionEnd
