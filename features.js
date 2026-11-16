@@ -35,6 +35,18 @@ const DEFAULTS = {
   hideFullscreen: true,
   autoUpdate: true, // download new versions from GitHub and offer a restart on the island
   addrIsland: true, // take the right third of the browser's address bar; off: stay in place, clicks pass through
+  // Desktop widgets (on the main screen)
+  desktopWidgets: true,
+  widgetSize: 'medium', // 'small' | 'medium' | 'large'
+  widgetNextPrayer: true,
+  widgetFivePrayers: false,
+  widgetTasbih: true,
+  widgetDayDates: false,
+  widgetStyle1: true,
+  widgetStyle2: false,
+  widgetStyle3: false,
+  timeFormat: '12', // '12' | '24'
+  slowNetToast: true,
   // performance (the battery saver turns all three on while the battery is low)
   noBlur: false, // solid island, no screen capture at all
   noAnimations: false,
@@ -93,11 +105,13 @@ const RANGES = {
 
 // settings that are one of a fixed list
 const CHOICES = {
-  theme: ['original', 'bakka', 'outline', 'midnight', 'forest', 'snow', 'cat', 'galaxy', 'aurora', 'ocean', 'nody', 'lava', 'retro'],
+  theme: ['original', 'bakka', 'outline', 'midnight', 'forest', 'snow', 'cat', 'galaxy', 'aurora', 'ocean', 'nody', 'lava', 'retro', 'madar'],
   prefsLang: ['en', 'ar'],
+  timeFormat: ['12', '24'],
+  widgetSize: ['small', 'medium', 'large'],
 };
 // themes without glass: no screen capture behind them
-const SOLID_THEMES = ['bakka', 'midnight', 'forest', 'cat', 'galaxy', 'aurora', 'ocean', 'nody', 'lava', 'retro'];
+const SOLID_THEMES = ['bakka', 'midnight', 'forest', 'cat', 'galaxy', 'aurora', 'ocean', 'nody', 'lava', 'retro', 'madar'];
 
 let values = { ...DEFAULTS, ...pick(settings.load('features.json', {})) };
 const listeners = [];

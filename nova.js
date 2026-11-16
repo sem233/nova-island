@@ -27,6 +27,7 @@ const prefsWindow = require('./prefs-window');
 const updater = require('./updater');
 const news = require('./news');
 const plugins = require('./plugins');
+const widgetsWindow = require('./widgets-window');
 
 // Keep our own windows (the mini player) out of Windows' media sessions, so the island and
 // the per-app commands keep targeting the browser tab rather than the mini player.
@@ -573,6 +574,8 @@ ipcMain.handle('mini-open', async (_e, req) => {
 const mdm = require('./mdm');
 const clips = require('./clips');
 clips.init(() => send('clips', clips.list()));
+const tasks = require('./tasks');
+tasks.init(() => send('tasks-update', tasks.list()));
 let videoDlBusy = false;
 
 async function resolveBrowserUrl(proc, title) {
@@ -1318,6 +1321,11 @@ app.whenReady().then(() => {
     send(ch, data);
     prefsWindow.send(ch, data);
   });
+  try {
+    widgetsWindow.start(prayer);
+  } catch (err) {
+    console.error('[widgets-window] start failed:', err);
+  }
   // Periodic idle memory trim to keep RAM usage minimal
   setInterval(() => {
     if (global.gc) {

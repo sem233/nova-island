@@ -34,6 +34,7 @@ const THEMES = [
   ['nody', 'Nody', 'Sakura pink, flowers for eyes'],
   ['lava', 'Lava', 'Glowing embers'],
   ['retro', 'Retro', 'Pixel green'],
+  ['madar', 'Madar', 'Graphite and mint'],
 ];
 const GLASS_THEMES = ['original', 'outline', 'snow'];
 $('#themes').innerHTML = THEMES.map(([id, name, desc]) => `
@@ -62,6 +63,7 @@ function showFeatures(f) {
   $$('[data-needs]').forEach((el) => el.classList.toggle('off', !el.dataset.needs.split(' ').every((k) => (k[0] === '!' ? !f[k.slice(1)] : f[k]))));
   // in the browser: the address bar, or stay in place with clicks passing through
   $$('[data-browser]').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.browser === 'addr') === !!f.addrIsland)));
+  $$('[data-wsize]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.wsize === (f.widgetSize || 'medium'))));
   $('#browser-hint').textContent = f.addrIsland
     ? 'Moves into the address bar, from its default place at the top'
     : 'Stays where it is; clicks go to the tabs below';
@@ -71,6 +73,20 @@ $$('[data-browser]').forEach((b) => b.addEventListener('click', () => {
   api.setFeatures({ addrIsland: b.dataset.browser === 'addr' });
   saved();
 }));
+
+$$('[data-wsize]').forEach((b) => b.addEventListener('click', () => {
+  api.setFeatures({ widgetSize: b.dataset.wsize });
+  $$('[data-wsize]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+  saved();
+}));
+
+const wResetBtn = $('#widgets-reset-btn');
+if (wResetBtn) {
+  wResetBtn.addEventListener('click', () => {
+    if (api && api.resetWidgetsPos) api.resetWidgetsPos();
+    saved('Reset places');
+  });
+}
 
 $$('[data-feature]').forEach((el) => el.addEventListener('change', () => {
   const key = el.dataset.feature;

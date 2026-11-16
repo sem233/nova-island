@@ -130,3 +130,10 @@
   --th-radius: 5px;
   --th-prev: #0b0f0c;
 }
+[data-theme="madar"] {
+  --th-bg: linear-gradient(180deg, #1d2026, #16181d);
+  --th-deco: radial-gradient(70% 120% at 85% -40%, rgba(147, 228, 200, .07), transparent 70%);
+  --th-line: rgba(255, 255, 255, .13); --th-line-w: 1px;
+  --th-text: #f2f4f6; --th-soft: rgba(214, 220, 226, .66); --th-hi: #93e4c8;
+  --th-prev: #15171b;
+}

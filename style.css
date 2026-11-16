@@ -1470,5 +1470,25 @@ body.no-blur:not(.th-solid) .tint, body.no-blur:not(.th-solid) #island.expanded 
   color: #38bdf8;
 }
 
+/* (1.8.7) Madar: graphite and mint (its colors are in themes.css) */
+body[data-theme="madar"] {
+  --accent-rgb: 147, 228, 200;
+  --fill-1: rgba(255, 255, 255, .05); --fill-2: rgba(255, 255, 255, .08); --fill-3: rgba(255, 255, 255, .12);
+  --glass-stroke: rgba(255, 255, 255, .13);
+}
+body[data-theme="madar"] .slider::before, body[data-theme="madar"] .bar, body[data-theme="madar"] .i-bar, body[data-theme="madar"] .t-bar, body[data-theme="madar"] .dl-bar { background: rgba(255, 255, 255, .14); }
+body[data-theme="madar"] .slider .fill, body[data-theme="madar"] .t-bar b, body[data-theme="madar"] .slider .knob { background: #93e4c8; }
+body[data-theme="madar"] .slider .knob { transform: scale(1); box-shadow: 0 0 0 3px rgba(147, 228, 200, .18); }
+body[data-theme="madar"] .ctl.play { background: #93e4c8; color: #10201b; box-shadow: 0 4px 16px rgba(147, 228, 200, .22); }
+body[data-theme="madar"] .ctl.play:hover { background: #a6ecd5; }
+body[data-theme="madar"] .topbar .seg { background: rgba(255, 255, 255, .035); box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .07); }
+body[data-theme="madar"] .seg-thumb { background: rgba(0, 0, 0, .28); box-shadow: inset 0 0 0 .5px rgba(255, 255, 255, .08); }
+body[data-theme="madar"] .tab.active { color: #93e4c8; }
+body[data-theme="madar"] .eq i { background: #93e4c8; box-shadow: none; }
+body[data-theme="madar"] .pr-next { background: linear-gradient(160deg, rgba(147, 228, 200, .16), rgba(255, 255, 255, .03) 70%); }
+body[data-theme="madar"] .pr-next::after { box-shadow: 14px 14px 0 0 rgba(147, 228, 200, .1); }
+body[data-theme="madar"] .pr-bell.on { background: rgba(147, 228, 200, .14); color: #93e4c8; }
+body[data-theme="madar"] .pr-row.next { background: rgba(147, 228, 200, .12); box-shadow: inset 0 0 0 .5px rgba(147, 228, 200, .35); }
+
 
 

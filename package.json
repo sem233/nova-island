@@ -1,7 +1,7 @@
 {
   "name": "nova-island",
-  "version": "1.7.7",
-  "buildTime": 1731680000000,
+  "version": "1.8.7",
+  "buildTime": 1731720000000,
   "description": "A living island for your Windows desktop",
   "main": "nova.js",
   "scripts": {
