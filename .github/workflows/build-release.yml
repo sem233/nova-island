@@ -15,21 +15,18 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: write   # needed to upload to a release
+      contents: write
 
     steps:
-      # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Rust (stable GNU – what build.ps1 uses) ───────────────────────────
       - name: Install Rust stable (GNU)
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           targets: x86_64-pc-windows-gnu
 
-      # ── 3. Cargo cache ───────────────────────────────────────────────────────
       - name: Cache cargo registry + build
         uses: actions/cache@v4
         with:
@@ -41,16 +38,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-gnu-
 
-      # ── 4. Python + Pillow (for installer artwork make-art.py) ───────────────
+      - name: Run workspace tests
+        shell: powershell
+        working-directory: nova-next
+        run: |
+          cargo +stable-x86_64-pc-windows-gnu test --workspace --locked
+          if ($LASTEXITCODE) { throw "cargo tests failed" }
+
       - name: Install Pillow
         run: pip install pillow
 
-      # ── 5. NSIS ──────────────────────────────────────────────────────────────
       - name: Install NSIS
         run: choco install nsis --no-progress -y
         shell: powershell
 
-      # ── 6. Download yt-dlp.exe (bundled into the installer) ──────────────────
       - name: Download yt-dlp.exe
         shell: powershell
         run: |
@@ -60,28 +61,21 @@ jobs:
           Invoke-WebRequest -Uri $url -OutFile "$dir\yt-dlp.exe" -UseBasicParsing
           Write-Host "yt-dlp: $((Get-Item "$dir\yt-dlp.exe").Length) bytes"
 
-      # ── 7. Build exe ─────────────────────────────────────────────────────────
       - name: Build nova-island.exe (release)
         shell: powershell
         working-directory: nova-next
         run: |
-          cargo +stable-x86_64-pc-windows-gnu build --release -p nova-app
+          cargo +stable-x86_64-pc-windows-gnu build --release --locked -p nova-app
           if ($LASTEXITCODE) { throw "cargo build failed" }
 
-      # ── 8. Build installer + portable ────────────────────────────────────────
       - name: Build installer & portable (NSIS)
         shell: powershell
-        run: |
-          powershell -ExecutionPolicy Bypass -File nova-next\installer\build.ps1
-        # build.ps1 runs cargo again internally; it will find the cached artifacts
-        # and skip recompile. NSIS makes dist\Nova-Island-Setup-*.exe and Portable.
+        run: powershell -ExecutionPolicy Bypass -File nova-next\installer\build.ps1
 
-      # ── 9. List output files ─────────────────────────────────────────────────
       - name: List dist output
         shell: powershell
         run: Get-ChildItem nova-next\target\dist | Select-Object Name,Length
 
-      # ── 10. Upload artifacts (always, for inspection) ────────────────────────
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -91,7 +85,6 @@ jobs:
             nova-next/target/dist/Nova-Island-*-Portable.exe
           if-no-files-found: error
 
-      # ── 11. Upload to GitHub Release (only on tag push or manual with a tag) ──
       - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
         uses: softprops/action-gh-release@v2
