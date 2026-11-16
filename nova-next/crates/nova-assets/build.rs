@@ -31,13 +31,13 @@ const OVERLAY_PRELOADS: &[&str] = &["radio/preload.js", "tasks/preload.js"];
 const PATCHES: &[(&str, &str, &str)] = &[
     // Quran Radio plays surahs from mp3quran's server (1.8)
     ("index.html", "https://qurango.net https://*.qurango.net", "https://qurango.net https://*.qurango.net https://cdn.mp3quran.net"),
-    // the island's own styles in 1.8 (style-2.css), after 1.7's
-    ("index.html", "  <link rel=\"stylesheet\" href=\"style.css\">\n", "  <link rel=\"stylesheet\" href=\"style.css\">\n  <link rel=\"stylesheet\" href=\"style-2.css\">\n"),
+    // the island's own styles in 1.8 (style-2.css), after 1.7's, plus QuickClips & MDM
+    ("index.html", "  <link rel=\"stylesheet\" href=\"style.css\">\n", "  <link rel=\"stylesheet\" href=\"style.css\">\n  <link rel=\"stylesheet\" href=\"style-2.css\">\n  <link rel=\"stylesheet\" href=\"style-quickclips.css\">\n"),
     // the radio window and the radio's state for it, and opening the app of a notification (1.8)
     (
         "preload.js",
         "  pluginSet: (id, key, value) => ipcRenderer.send('plugin-setting', id, key, value),\n",
-        "  pluginSet: (id, key, value) => ipcRenderer.send('plugin-setting', id, key, value),\n  radioOpen: () => ipcRenderer.send('radio-open'),\n  appNotifyOpen: (id) => ipcRenderer.send('app-notify-open', id),\n  radioNow: (s) => ipcRenderer.send('radio-now', s),\n  radioSuwar: () => ipcRenderer.invoke('radio-suwar'),\n  onRadioPlay: on('radio-play'),\n",
+        "  pluginSet: (id, key, value) => ipcRenderer.send('plugin-setting', id, key, value),\n  radioOpen: () => ipcRenderer.send('radio-open'),\n  appNotifyOpen: (id) => ipcRenderer.send('app-notify-open', id),\n  radioNow: (s) => ipcRenderer.send('radio-now', s),\n  radioSuwar: () => ipcRenderer.invoke('radio-suwar'),\n  onRadioPlay: on('radio-play'),\n  videoProbe: (req) => ipcRenderer.invoke('video-probe', req),\n  videoDownload: (req) => ipcRenderer.invoke('video-download', req),\n  onVideoDl: on('video-dl'),\n  clips: {\n    list: () => ipcRenderer.invoke('clips-list'),\n    add: (t) => ipcRenderer.invoke('clips-add', t),\n    addFromClipboard: () => ipcRenderer.invoke('clips-add-clipboard'),\n    remove: (id) => ipcRenderer.invoke('clips-remove', id),\n    pin: (id, p) => ipcRenderer.invoke('clips-pin', id, p),\n    edit: (id, t) => ipcRenderer.invoke('clips-edit', id, t),\n    clear: (p) => ipcRenderer.invoke('clips-clear', p),\n    copy: (id) => ipcRenderer.send('clips-copy', id),\n    onUpdate: on('clips'),\n  },\n",
     ),
     // other apps' notifications on the island, off by default (1.8)
     (
@@ -105,19 +105,79 @@ const PATCHES: &[(&str, &str, &str)] = &[
         "<span class=\"plug-ico\">${PLUG_ICON}</span>",
         "<span class=\"plug-ico${p.kind === 'tasks' || p.id === 'tasks' ? ' tasks' : ''}\">${p.kind === 'tasks' || p.id === 'tasks' ? '<svg viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"5\"/><path d=\"m8 12.5 3 3 5-6\"/></svg>' : PLUG_ICON}</span>",
     ),
-    // Tasks on the island (1.8.3): a tab after Timer while the plugin is on, its view, its script
+    // Tasks on the island (1.8.3): a tab after Timer while the plugin is on, its view, its script, plus QuickClips & MDM
     (
         "index.html",
         "            <button role=\"tab\" data-tab=\"system\" class=\"tab\" aria-label=\"System\">",
-        "            <button role=\"tab\" data-tab=\"tasks\" class=\"tab\" aria-label=\"Tasks\" hidden>\n              <svg class=\"s\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"5\"/><path d=\"m8 12.5 3 3 5-6\"/></svg><span>Tasks</span><i class=\"badge\" id=\"tasks-badge\"></i>\n            </button>\n            <button role=\"tab\" data-tab=\"system\" class=\"tab\" aria-label=\"System\">",
+        "            <button role=\"tab\" data-tab=\"tasks\" class=\"tab\" aria-label=\"Tasks\" hidden>\n              <svg class=\"s\" viewBox=\"0 0 24 24\"><rect x=\"3\" y=\"3\" width=\"18\" height=\"18\" rx=\"5\"/><path d=\"m8 12.5 3 3 5-6\"/></svg><span>Tasks</span><i class=\"badge\" id=\"tasks-badge\"></i>\n            </button>\n            <button role=\"tab\" data-tab=\"quickclips\" class=\"tab\" aria-label=\"Quick Clips\">\n              <svg class=\"s\" viewBox=\"0 0 24 24\"><path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\"/><rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\"/><path d=\"m9 14 2 2 4-4\"/></svg><span>Clips</span>\n            </button>\n            <button role=\"tab\" data-tab=\"system\" class=\"tab\" aria-label=\"System\">",
     ),
     (
         "index.html",
         "        <section id=\"v-system\" class=\"view\" role=\"tabpanel\">",
-        "        <section id=\"v-tasks\" class=\"view\" role=\"tabpanel\">\n          <div class=\"tk\">\n            <div class=\"tk-head\">\n              <b>Tasks</b><span class=\"sub\" id=\"tk-count\"></span>\n              <button class=\"pill small\" id=\"tk-open\">Open</button>\n            </div>\n            <div class=\"tk-list\" id=\"tk-list\"></div>\n          </div>\n        </section>\n        <section id=\"v-system\" class=\"view\" role=\"tabpanel\">",
+        r#"        <section id="v-tasks" class="view" role="tabpanel">
+          <div class="tk">
+            <div class="tk-head">
+              <b>Tasks</b><span class="sub" id="tk-count"></span>
+              <button class="pill small" id="tk-open">Open</button>
+            </div>
+            <div class="tk-list" id="tk-list"></div>
+          </div>
+        </section>
+        <section id="v-quickclips" class="view qc-view" role="tabpanel">
+          <div class="qc-toolbar">
+            <button id="qc-paste-btn" class="qc-action-btn primary" title="Paste text from clipboard instantly">
+              <svg class="s" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/><path d="m9 14 2 2 4-4"/></svg>
+              <span>Paste Clipboard</span>
+            </button>
+            <button id="qc-add-btn" class="qc-action-btn" title="Write a custom clip">
+              <svg class="s" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+              <span>New</span>
+            </button>
+            <div class="qc-spacer"></div>
+            <button id="qc-pin-island-btn" class="qc-icon-btn" title="Pin island open">
+              <svg class="s" viewBox="0 0 24 24"><line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+            </button>
+            <button id="qc-clear-btn" class="qc-icon-btn" title="Clear unpinned clips">
+              <svg class="s" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg>
+            </button>
+          </div>
+          <div id="qc-add-panel" class="qc-add-panel" hidden>
+            <textarea id="qc-new-text" class="qc-textarea" placeholder="Type or paste your text here… (Ctrl+Enter to save)" rows="3"></textarea>
+            <div class="qc-add-actions">
+              <button id="qc-save-btn" class="pill small primary">Save Clip</button>
+              <button id="qc-cancel-btn" class="pill small">Cancel</button>
+            </div>
+          </div>
+          <div id="qc-list" class="qc-list"></div>
+          <div class="qc-empty" id="qc-empty">
+            <svg class="s" viewBox="0 0 24 24"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>
+            <span>No clips yet — click <b>Paste Clipboard</b> or <b>New</b></span>
+          </div>
+        </section>
+        <section id="v-system" class="view" role="tabpanel">"#,
     ),
-    ("index.html", "  <script src=\"views/radio.js\"></script>\n", "  <script src=\"views/radio.js\"></script>\n  <script src=\"views/tasks.js\"></script>\n"),
-    ("renderer.js", "t === 'radio' ? !state.radioTab : ", "t === 'radio' ? !state.radioTab : t === 'tasks' ? !state.tasksTab : "),
+    (
+        "index.html",
+        "                <button id=\"pip-btn\" class=\"mini-btn pip\" title=\"Pop out into a floating mini player\" aria-label=\"Open mini player\">\n                  <svg class=\"s ico\" viewBox=\"0 0 24 24\"><path d=\"M21 10V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4\"/><rect x=\"12\" y=\"13\" width=\"10\" height=\"7\" rx=\"2\"/></svg>\n                  <span class=\"spin\" aria-hidden=\"true\"></span>\n                </button>\n",
+        "                <button id=\"pip-btn\" class=\"mini-btn pip\" title=\"Pop out into a floating mini player\" aria-label=\"Open mini player\">\n                  <svg class=\"s ico\" viewBox=\"0 0 24 24\"><path d=\"M21 10V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4\"/><rect x=\"12\" y=\"13\" width=\"10\" height=\"7\" rx=\"2\"/></svg>\n                  <span class=\"spin\" aria-hidden=\"true\"></span>\n                </button>\n                <button id=\"vdl-btn\" class=\"mini-btn vdl\" title=\"Download Video / Extract MP3 (تحميل الفيديو أو الصوت)\" aria-label=\"Download video\">\n                  <svg class=\"s ico\" viewBox=\"0 0 24 24\"><path d=\"M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3\"/></svg>\n                  <svg class=\"s ico-x\" viewBox=\"0 0 24 24\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg>\n                  <span class=\"spin\" aria-hidden=\"true\"></span>\n                </button>\n",
+    ),
+    (
+        "index.html",
+        "                  <span id=\"vol-pct\" class=\"vol-pct\"></span>\n                </div>\n              </div>\n            </div>\n",
+        "                  <span id=\"vol-pct\" class=\"vol-pct\"></span>\n                </div>\n              </div>\n              <div class=\"vdl-drawer\" id=\"vdl-drawer\"><div class=\"vdl-list\" id=\"vdl-list\"></div></div>\n            </div>\n",
+    ),
+    ("index.html", "  <script src=\"views/radio.js\"></script>\n", "  <script src=\"views/radio.js\"></script>\n  <script src=\"views/tasks.js\"></script>\n  <script src=\"views/quickclips.js\"></script>\n  <script src=\"views/vdl.js\"></script>\n"),
+    ("renderer.js", "t === 'radio' ? !state.radioTab : ", "t === 'radio' ? !state.radioTab : t === 'tasks' ? !state.tasksTab : t === 'quickclips' ? false : "),
+    (
+        "renderer.js",
+        "const NO_DRAG = 'button, input, .slider, .file, .app, .pick, .picker, .clip-item, .shelf-items';",
+        "const NO_DRAG = 'button, input, textarea, .slider, .file, .app, .pick, .picker, .clip-item, .shelf-items, .vdl-drawer, .qc-list, .qc-textarea, .qc-add-panel, .qc-action-btn, .qc-icon-btn, .qc-btn, .qc-row';",
+    ),
+    (
+        "renderer.js",
+        "bridge.onToggle(() => {\n  state.pinned = !state.pinned;\n",
+        "window.state = state;\nwindow.render = render;\nwindow.togglePin = (force) => {\n  state.pinned = typeof force === 'boolean' ? force : !state.pinned;\n  if (!state.pinned) state.hover = false;\n  bridge.setPinned(state.pinned);\n  render();\n  window.dispatchEvent(new CustomEvent('island:pinned', { detail: { pinned: state.pinned } }));\n  return state.pinned;\n};\nbridge.onToggle(() => {\n  window.togglePin();\n",
+    ),
     // Tasks (1.8.3): the island's list, finishing one, snoozing a reminder, opening the window
     (
         "preload.js",

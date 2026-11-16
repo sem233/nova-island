@@ -9,7 +9,11 @@ fn main() {
     // (1.8.7) the main thread's stack: 8 MB instead of Windows' 1 MB. Running out of it ends the
     // app with no panic and no log line (Partner Center's FAIL_FAST c0000409); the pages, the
     // widgets and the COM callbacks all run deep on this one thread. It's only reserved, not used.
-    println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("gnu") {
+        println!("cargo:rustc-link-arg-bins=-Wl,--stack,8388608");
+    } else {
+        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    }
     let v = env::var("CARGO_PKG_VERSION").unwrap();
     let n: Vec<u32> = v.split('.').map(|x| x.parse().unwrap_or(0)).collect();
     let (a, b, c) = (n.first().copied().unwrap_or(0), n.get(1).copied().unwrap_or(0), n.get(2).copied().unwrap_or(0));

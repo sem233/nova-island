@@ -19,6 +19,8 @@ mod island;
 mod prefs;
 mod radio;
 mod mini;
+pub mod clips;
+pub mod mdm;
 mod router;
 mod screen;
 mod shot;
@@ -122,6 +124,8 @@ pub struct App {
     /// The island's radio: {station, surah, playing, live}, for the Radio window.
     pub radio_now: Value,
     clip_seq: Option<u64>,
+    pub clips: clips::ClipsManager,
+    pub data_dir: PathBuf,
 }
 
 thread_local! {
@@ -828,7 +832,7 @@ fn run() -> Result<(), String> {
     let tasks = nova_services::tasks::Tasks::new(ctx.clone());
     let app_notify = nova_services::appnotify::AppNotify::new(ctx.clone());
     let shots = nova_services::screenshot::Screenshots::new(ctx.clone(), shelf.clone());
-    let app_rc = Rc::new(RefCell::new(App { core: core::Core::new(win, send, Store::new(dir.clone()), features), glass: glass::Glass::new(), env: None, page: None, sys, sys_lines: line_rx, bus, bus_rx, shared_features, system, prayer, network, privacy, apps, shelf, downloads, news, calendar, plugins, shots, updater, app_notify, prefs: None, radio: None, tasks_win: None, tasks, radio_now: serde_json::json!({}), clip_seq: None }));
+    let app_rc = Rc::new(RefCell::new(App { core: core::Core::new(win, send, Store::new(dir.clone()), features), glass: glass::Glass::new(), env: None, page: None, sys, sys_lines: line_rx, bus, bus_rx, shared_features, system, prayer, network, privacy, apps, shelf, downloads, news, calendar, plugins, shots, updater, app_notify, prefs: None, radio: None, tasks_win: None, tasks, radio_now: serde_json::json!({}), clip_seq: None, clips: clips::ClipsManager::new(dir.clone()), data_dir: dir.clone() }));
     APP.with(|a| *a.borrow_mut() = Some(app_rc.clone()));
 
     // HardwareMediaKeyHandling off, like nova.js: the island's own audio (Quran Radio, the adhan)

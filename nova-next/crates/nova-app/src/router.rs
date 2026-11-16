@@ -401,6 +401,40 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
             }
             Value::Null
         }
+        // --- QuickClips (clips.js) ---
+        "clips-list" => app.borrow().clips.list(),
+        "clips-add" => app.borrow().clips.add(arg0.as_str().unwrap_or("")),
+        "clips-add-clipboard" => app.borrow().clips.add_from_clipboard(),
+        "clips-remove" => app.borrow().clips.remove(arg0.as_str().unwrap_or("")),
+        "clips-pin" => {
+            let pinned = args.get(1).and_then(Value::as_bool).unwrap_or(false);
+            app.borrow().clips.pin(arg0.as_str().unwrap_or(""), pinned)
+        }
+        "clips-edit" => {
+            let text = args.get(1).and_then(Value::as_str).unwrap_or("");
+            app.borrow().clips.edit(arg0.as_str().unwrap_or(""), text)
+        }
+        "clips-clear" => {
+            let keep_pinned = arg0.as_bool().unwrap_or(true);
+            app.borrow().clips.clear(keep_pinned)
+        }
+        "clips-copy" => {
+            app.borrow().clips.copy(arg0.as_str().unwrap_or(""));
+            Value::Null
+        }
+        // --- Video Downloader (MDM) ---
+        "video-probe" => {
+            let data_dir = app.borrow().data_dir.clone();
+            let req = arg0.clone();
+            later(app, id, move || crate::mdm::probe_video(&req, &data_dir));
+            return;
+        }
+        "video-download" => {
+            let data_dir = app.borrow().data_dir.clone();
+            let req = arg0.clone();
+            later(app, id, move || crate::mdm::download_video(&req, &data_dir));
+            return;
+        }
         // smart clipboard: act on what the app itself recognised, never on data from the page
         "clip-action" => {
             let s = app.borrow().system.last_smart();

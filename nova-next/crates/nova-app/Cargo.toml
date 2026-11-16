@@ -18,6 +18,7 @@ nova-sys = { path = "../nova-sys" }
 nova-services = { path = "../nova-services" }
 nova-render = { path = "../nova-render" }
 webview2-com = "=0.39.1"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dependencies.windows]
