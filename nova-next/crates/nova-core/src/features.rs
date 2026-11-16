@@ -41,7 +41,7 @@ pub fn defaults() -> Map<String, Value> {
         ("hideFullscreen", json!(true)),
         ("autoUpdate", json!(true)), // download new versions from GitHub and offer a restart on the island
         // take the right third of the browser's address bar
-        ("addrIsland", json!(true)),
+        ("addrIsland", json!(false)),
         ("browserLine", json!(false)),
         ("taskbarStrip", json!(false)), // (1.8.7) the Nova strip on the taskbar (display only)
         // performance (the battery saver turns all three on while the battery is low)

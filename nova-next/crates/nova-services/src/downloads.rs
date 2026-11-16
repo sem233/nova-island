@@ -38,6 +38,29 @@ const STALLED_MS: f64 = 10.0 * 60.0 * 1000.0; // no growth for this long: shown 
 const KEEP_DONE_MS: f64 = 60.0 * 60.0 * 1000.0;
 const MAX_DONE: usize = 10;
 
+static EXPECTED_TOTALS: std::sync::LazyLock<Mutex<HashMap<String, u64>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn set_expected_total(hint: &str, bytes: u64) {
+    if bytes > 0 {
+        if let Ok(mut map) = EXPECTED_TOTALS.lock() {
+            map.insert(hint.to_lowercase(), bytes);
+        }
+    }
+}
+
+pub fn find_expected_total(name: &str) -> u64 {
+    let lower = name.to_lowercase();
+    if let Ok(map) = EXPECTED_TOTALS.lock() {
+        for (hint, &sz) in map.iter() {
+            if lower.contains(hint) || hint.contains(&lower) {
+                return sz;
+            }
+        }
+    }
+    0
+}
+
 fn is_partial(p: &str) -> bool {
     let l = p.to_lowercase();
     [".crdownload", ".part", ".partial", ".download", ".opdownload", ".!ut", ".!qb"].iter().any(|e| l.ends_with(e))
@@ -292,6 +315,16 @@ impl Downloads {
                     let _ = std::process::Command::new(exe).spawn();
                 }
             }
+            "cancel" => {
+                if let Some(p) = id.strip_prefix("f:") {
+                    let _ = std::fs::remove_file(p);
+                    // Also try without .part or other partial extensions
+                    let mut f = self.folders.lock().unwrap();
+                    f.live.remove(p);
+                    drop(f);
+                    self.publish();
+                }
+            }
             "pause" | "resume" | "show" if d.as_ref().is_none_or(|d| d["source"] != "folder") => {
                 let body = json!({ "id": if id.is_empty() { Value::Null } else { json!(id) }, "action": action }).to_string();
                 let headers = self.headers("content-type: application/json\r\n");
@@ -406,10 +439,18 @@ impl Downloads {
         live.sort_by(|a, b| a.1.first_seen.partial_cmp(&b.1.first_seen).unwrap());
         let mut out: Vec<Value> = live
             .iter()
-            .map(|(p, d)| json!({
-                "id": format!("f:{p}"), "name": d.name, "source": "folder", "createdAt": d.created_at, "downloaded": d.size, "total": 0, "eta": null,
-                "status": if now - d.grew_at > STALLED_MS { "paused" } else { "downloading" }, "speed": if now - d.grew_at > 3000.0 { 0.0 } else { d.speed },
-            }))
+            .map(|(p, d)| {
+                let total = find_expected_total(&d.name);
+                let eta = if total > d.size as u64 && d.speed > 0.0 {
+                    Some(((total - d.size as u64) as f64 / d.speed).round() as u64)
+                } else {
+                    None
+                };
+                json!({
+                    "id": format!("f:{p}"), "name": d.name, "source": "folder", "createdAt": d.created_at, "downloaded": d.size, "total": total, "eta": eta,
+                    "status": if now - d.grew_at > STALLED_MS { "paused" } else { "downloading" }, "speed": if now - d.grew_at > 3000.0 { 0.0 } else { d.speed },
+                })
+            })
             .collect();
         out.extend(f.done.iter().map(|(d, _)| d.clone()));
         out

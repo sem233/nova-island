@@ -779,6 +779,12 @@ fn run() -> Result<(), String> {
 
     // the services, on their own threads, talking to the page through the bus
     let (bus, bus_rx) = bus::Bus::new(hwnd);
+    {
+        let bus_vdl = bus.clone();
+        crate::mdm::set_progress_cb(move |val| {
+            bus_vdl.event("video-dl", val);
+        });
+    }
     let shared_features = Arc::new(Mutex::new(features.get()));
     let ctx = nova_services::ctx::Ctx { emit: bus.emitter(), dir: dir.clone(), features: shared_features.clone() };
     let system = nova_services::system::System::new(ctx.clone());

@@ -7,12 +7,45 @@
 use std::{
     collections::HashMap,
     fs,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::Command,
-    sync::Mutex,
+    process::{Child, Command, Stdio},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::{Duration, Instant},
 };
 use serde_json::{json, Value};
+
+static DL_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+static ACTIVE_DL: std::sync::LazyLock<Mutex<HashMap<String, Child>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static PROGRESS_CB: std::sync::LazyLock<
+    Mutex<Option<Box<dyn Fn(Value) + Send + Sync>>>,
+> = std::sync::LazyLock::new(|| Mutex::new(None));
+
+pub fn set_progress_cb(f: impl Fn(Value) + Send + Sync + 'static) {
+    *PROGRESS_CB.lock().unwrap() = Some(Box::new(f));
+}
+
+pub fn cancel_download(id: &str) {
+    if let Ok(mut map) = ACTIVE_DL.lock() {
+        if let Some(mut child) = map.remove(id) {
+            let _ = child.kill();
+        }
+    }
+}
+
+pub fn active_downloads() -> Vec<Value> {
+    if let Ok(map) = ACTIVE_DL.lock() {
+        map.keys().map(|k| Value::String(k.clone())).collect()
+    } else {
+        vec![]
+    }
+}
 
 struct ProbeCacheEntry {
     at: Instant,
@@ -254,7 +287,10 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
         "--no-playlist",
         "--no-warnings",
         "--socket-timeout",
-        "15",
+        "10",
+        "--no-check-certificates",
+        "--extractor-retries",
+        "1",
     ]);
     if let Some(ff) = find_ffmpeg(data_dir) {
         cmd.arg("--ffmpeg-location");
@@ -459,6 +495,11 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
     let kind = choice["kind"].as_str().unwrap_or("video");
     let format_id = choice["format_id"].as_str().unwrap_or("best");
     let label = choice["label"].as_str().unwrap_or("video").to_string();
+    let size = choice["size"].as_u64().unwrap_or(0);
+    let title = req["title"].as_str().unwrap_or("").to_string();
+    if size > 0 && !title.is_empty() {
+        nova_services::downloads::set_expected_total(&title, size);
+    }
 
     let downloads_dir = PathBuf::from(nova_services::downloads::downloads_folder());
     let template = downloads_dir.join("%(title).150B [%(resolution)s].%(ext)s").to_string_lossy().into_owned();
@@ -506,19 +547,77 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
         }
     }
 
+    args.push("--newline".to_string());
     args.push(url);
+
+    // Generate a unique download ID
+    let dl_id = format!("dl-{}", DL_COUNTER.fetch_add(1, Ordering::Relaxed));
+    let dl_id_clone = dl_id.clone();
 
     // Spawn yt-dlp in the background so it doesn't block the UI thread
     std::thread::spawn(move || {
         let mut cmd = Command::new(&ytdlp);
         cmd.args(&args);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
         }
-        let _ = cmd.status();
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        let stdout_pipe = child.stdout.take();
+
+        {
+            let mut map = ACTIVE_DL.lock().unwrap();
+            map.insert(dl_id_clone.clone(), child);
+        }
+
+        // Reader thread: parse yt-dlp progress lines
+        if let Some(pipe) = stdout_pipe {
+            let id_for_reader = dl_id_clone.clone();
+            let reader = BufReader::new(pipe);
+            for line in reader.lines().map_while(Result::ok) {
+                // Parse lines like: [download]  12.3% of  245.00MiB at  2.50MiB/s ETA 01:32
+                if line.contains("[download]") && line.contains('%') {
+                    let pct = line
+                        .split('%')
+                        .next()
+                        .and_then(|s| s.split_whitespace().last())
+                        .and_then(|s| s.parse::<f64>().ok());
+                    if let Some(p) = pct {
+                        let progress_val = json!({
+                            "id": id_for_reader,
+                            "pct": p,
+                            "line": line.trim(),
+                        });
+                        if let Ok(cb) = PROGRESS_CB.lock() {
+                            if let Some(f) = cb.as_ref() {
+                                f(progress_val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Child finished — remove from active map and send done signal
+        {
+            let mut map = ACTIVE_DL.lock().unwrap();
+            map.remove(&dl_id_clone);
+        }
+        let done_val = json!({ "id": dl_id_clone, "done": true });
+        if let Ok(cb) = PROGRESS_CB.lock() {
+            if let Some(f) = cb.as_ref() {
+                f(done_val);
+            }
+        }
     });
 
-    json!({ "ok": true, "label": label })
+    json!({ "ok": true, "id": dl_id, "label": label })
 }

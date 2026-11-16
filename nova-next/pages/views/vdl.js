@@ -1,9 +1,9 @@
-// Video Downloader (MDM) UI controller for Nova Island
-// Derived from the battle-tested mdm.js / renderer.js workflow:
-// - Hover pre-fetch on download button (300ms) for instant 0ms response when clicked
-// - Stable in-memory drawer: does NOT vanish or dismiss on periodic media playback ticks
-// - Keeps the island pinned while picking quality
-// - Formatted sizes and crisp chips for all detected video resolutions & MP3 (320k)
+// Video Downloader (MDM) UI controller for Nova Island — v1.8.8
+// Improvements:
+//   • فور الضغط يظهر "جاري البحث عن الجودات…" مع spinner على الزر
+//   • لما تبعد الماوس وفيه probe جاهز: flash على الجزيرة + toast "جودات جاهزة"
+//   • pre-probe تلقائي بعد 2 ثانية من بداية تشغيل الميديا (بكرة عشان تلقى الجودات جاهزة فور الضغط)
+//   • إصلاح window size glitch عند فتح/إغلاق الـ drawer (يبلغ عن الحجم بعد الانيميشن)
 (() => {
   const $ = (s) => document.querySelector(s);
   const bridge = window.nova || window.bridge;
@@ -18,7 +18,10 @@
   let vdlPrefetched = false;
   let vdlProbeTime = 0;
   let vdlHoverTimer = null;
+  let vdlAutoProbeTimer = null;
   let lastTrackKey = '';
+  // Active download ID (for cancel support when backend provides it)
+  let activeDownloadId = null;
 
   function getState() {
     return window.state || { media: { has: false } };
@@ -26,6 +29,10 @@
 
   function doRender() {
     if (typeof window.render === 'function') window.render();
+    // Always report rect after any layout change to fix size glitch
+    if (typeof window.reportRect === 'function') {
+      requestAnimationFrame(() => window.reportRect());
+    }
   }
 
   function fmtVdlSize(bytes, note) {
@@ -97,6 +104,10 @@
           '</button>';
       }).join('');
     }
+    // Fix window size glitch: report rect after drawer opens (after CSS transition)
+    setTimeout(() => {
+      if (typeof window.reportRect === 'function') window.reportRect();
+    }, 50);
   }
 
   function closeVdlPicker(silent = false) {
@@ -116,6 +127,10 @@
         el.textContent = m?.has ? m.artist || m.album || m.app || '' : '';
       }
     }
+    // Fix window size glitch: report rect after drawer closes (after CSS transition ~360ms)
+    setTimeout(() => {
+      if (typeof window.reportRect === 'function') window.reportRect();
+    }, 400);
   }
 
   async function startVdlChoice(choice) {
@@ -124,7 +139,7 @@
     const probeUrl = vdlProbeData?.url || '';
     closeVdlPicker(true);
     vdlBtn.classList.add('busy');
-    vdlShow(`بدء تحميل ${choice?.label || 'الفيديو'}…`);
+    vdlShow(`جاري بدء تحميل ${choice?.label || 'الفيديو'}…`);
     let res;
     try {
       res = await bridge.videoDownload({
@@ -138,9 +153,10 @@
     }
     vdlBtn.classList.remove('busy');
     if (res?.ok) {
+      activeDownloadId = res.id || null;
       vdlBtn.classList.add('done');
       setTimeout(() => vdlBtn.classList.remove('done'), 4000);
-      vdlShow(`جاري تحميل ${res.label || choice?.label || 'الفيديو'} بنجاح ✓`, 'ok');
+      vdlShow(`جاري تحميل ${res.label || choice?.label || 'الفيديو'} ✓`, 'ok');
       vdlProbeData = null;
       vdlPrefetched = false;
     } else {
@@ -158,7 +174,34 @@
     });
   }
 
-  // Hover prefetch: probe in background on button hover so qualities appear instantly on click
+  // --- Auto probe: starts 2s after media begins playing (background, silent) ---
+  // هيخلي الجودات تكون جاهزة قبل ما تضغط الزر بكتير
+  function scheduleAutoProbe() {
+    clearTimeout(vdlAutoProbeTimer);
+    if (vdlPrefetched || vdlPrefetching || vdlProbeData) return;
+    vdlAutoProbeTimer = setTimeout(async () => {
+      const m = getState().media || {};
+      if (!m.has || vdlPrefetching || vdlPrefetched || vdlProbeData) return;
+      vdlPrefetching = true;
+      try {
+        const res = await bridge.videoProbe({ app: m.app || '', title: m.title || '' });
+        if (res?.ok && Array.isArray(res.choices) && res.choices.length) {
+          vdlProbeData = res;
+          vdlPrefetched = true;
+          vdlProbeTime = Date.now();
+          // Flash subtle glow on island pill
+          const island = document.getElementById('island');
+          if (island) {
+            island.classList.add('dl-flash');
+            setTimeout(() => island.classList.remove('dl-flash'), 1800);
+          }
+        }
+      } catch {}
+      vdlPrefetching = false;
+    }, 2000);
+  }
+
+  // Hover prefetch (kept as backup)
   if (vdlBtn) {
     vdlBtn.addEventListener('mouseenter', () => {
       const m = getState().media || {};
@@ -193,7 +236,7 @@
         return;
       }
 
-      // If we already have fresh probe data (e.g. from hover prefetch) -> show instantly!
+      // If we already have fresh probe data -> show instantly!
       if (vdlProbeData && Array.isArray(vdlProbeData.choices) && vdlProbeData.choices.length && (Date.now() - vdlProbeTime < 300000)) {
         renderVdlChoices(vdlProbeData);
         if (view) view.classList.add('picking');
@@ -203,9 +246,9 @@
         return;
       }
 
-      // Otherwise start probe now with animated busy feedback
+      // Otherwise probe now — with busy spinner + clear Arabic message
       vdlBtn.classList.add('busy');
-      vdlShow('جاري فحص رابط وجودات الفيديو…');
+      vdlShow('جاري البحث عن الجودات…');
       let res;
       try {
         res = await bridge.videoProbe({ app: m.app || '', title: m.title || '' });
@@ -254,6 +297,10 @@
         vdlShow('اختر جودة الفيديو أو MP3');
       }
     }
+    // Fix window size on any mode change
+    setTimeout(() => {
+      if (typeof window.reportRect === 'function') window.reportRect();
+    }, 100);
   });
 
   // Only close picker when the actual TRACK changes (title/artist/app change),
@@ -267,13 +314,25 @@
         vdlProbeData = null;
         vdlPrefetched = false;
         vdlPrefetching = false;
+        activeDownloadId = null;
+        // Auto-probe when new track starts playing
+        if (m?.has) scheduleAutoProbe();
       }
     });
   }
 
   if (bridge && typeof bridge.onVideoDl === 'function') {
     bridge.onVideoDl((d) => {
-      if (vdlBtn?.classList.contains('busy') && d?.text) vdlShow(String(d.text));
+      if (d?.pct != null) {
+        vdlShow(`جاري التحميل ${Math.round(d.pct)}%`);
+      } else if (d?.done) {
+        vdlShow('اكتمل التحميل بنجاح ✓', 'ok');
+        vdlBtn?.classList.remove('busy');
+        vdlBtn?.classList.add('done');
+        setTimeout(() => vdlBtn?.classList.remove('done'), 4000);
+      } else if (d?.text) {
+        vdlShow(String(d.text));
+      }
     });
   }
 })();

@@ -321,9 +321,34 @@
 }
 
 /* Video Downloader (MDM) */
-.vdl { margin-inline-end: 6px; transition: background .2s ease, color .2s ease, transform .28s var(--spring); }
+.vdl { margin-inline-end: 6px; transition: background .2s ease, color .2s ease, transform .28s var(--spring); position: relative; }
 .vdl .ico-x { display: none; }
 .vdl.done { color: var(--green, #30d158); }
+
+/* Busy spinner: يظهر لما جاري البحث عن الجودات */
+.vdl.busy { pointer-events: none; }
+.vdl.busy .ico,
+.vdl.busy .ico-x { opacity: 0; }
+.vdl.busy::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: rgb(var(--accent-rgb, 124, 156, 255));
+  border-right-color: rgba(var(--accent-rgb, 124, 156, 255), .4);
+  animation: vdl-spin .7s linear infinite;
+}
+@keyframes vdl-spin { to { transform: rotate(360deg); } }
+
+/* dl-flash: وميض ناعم على الجزيرة لما الجودات جاهزة */
+@keyframes dl-flash-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 124, 156, 255), 0); }
+  40%  { box-shadow: 0 0 0 6px rgba(var(--accent-rgb, 124, 156, 255), .35); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 124, 156, 255), 0); }
+}
+.dl-flash { animation: dl-flash-pulse .9s ease-out 2; }
+
 #v-media.picking .vdl { background: rgba(var(--accent-rgb), .24); color: rgb(var(--accent-rgb)); transform: rotate(90deg); }
 #v-media.picking .vdl .ico { display: none; }
 #v-media.picking .vdl .ico-x { display: block; }
@@ -383,3 +408,16 @@
 }
 .vdl-chip.audio .vdl-tag { background: rgba(48, 209, 88, .22); color: #6ee7b7; }
 .vdl-sz { font-size: 10.5px; font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+
+/* Ensure picking / expanded quality drawer NEVER gets squished into a line */
+#island.addr-line.picking,
+#island.addr-slim.picking,
+#island.picking {
+  --w: 548px !important;
+  --h: 232px !important;
+  --r: 28px !important;
+}
+#island.picking .layer {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}

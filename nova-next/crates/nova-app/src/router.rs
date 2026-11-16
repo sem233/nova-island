@@ -718,6 +718,14 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
             app.borrow_mut().core.relayout();
             Value::Null
         }
+        // --- Video Downloader (MDM) — cancel a running download, list active IDs ---
+        "video-cancel" => {
+            crate::mdm::cancel_download(arg0.as_str().unwrap_or(""));
+            Value::Null
+        }
+        "video-dl-active" => {
+            Value::Array(crate::mdm::active_downloads())
+        }
         _ => {
             handled = false;
             Value::Null
