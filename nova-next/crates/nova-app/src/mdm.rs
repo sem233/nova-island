@@ -1,11 +1,26 @@
 //! MDM — video and high-quality MP3 stream downloader for Nova Island.
-//! Uses yt-dlp to probe video qualities (1080p, 720p, 480p, MP3 320k) and download directly into the Downloads folder.
+//! Derived from the user's custom mdm.js engine:
+//! - In-memory probe cache (8 min TTL) so repeated probes and clicks return in 0ms
+//! - Full format parsing for all video heights (4K, 2K, 1080p, 720p, 480p, 360p) + MP3 (320k)
+//! - Accurate file size calculation via bitrates * duration or exact stream metadata
+//! - High-speed parallel chunk downloading (-N 8, --hls-prefer-native)
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::Mutex,
+    time::{Duration, Instant},
 };
 use serde_json::{json, Value};
+
+struct ProbeCacheEntry {
+    at: Instant,
+    data: Value,
+}
+
+static PROBE_CACHE: std::sync::LazyLock<Mutex<HashMap<String, ProbeCacheEntry>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn find_ytdlp(data_dir: &Path) -> Option<PathBuf> {
     // 1. Beside running exe or in exe's tools subfolder
@@ -208,19 +223,39 @@ pub fn resolve_url(req: &Value) -> Option<String> {
 }
 
 /// Probes a video URL and returns available qualities.
+/// Derived from mdm.js buildChoicesFromInfo with fast in-memory caching.
 pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
     let Some(url) = resolve_url(req) else {
         return json!({ "ok": false, "error": "no-url" });
     };
+
+    // 1. Check in-memory probe cache (8 min TTL)
+    {
+        if let Ok(mut cache) = PROBE_CACHE.lock() {
+            cache.retain(|_, entry| entry.at.elapsed() < Duration::from_secs(8 * 60));
+            if let Some(entry) = cache.get(&url) {
+                return entry.data.clone();
+            }
+        }
+    }
 
     let ytdlp = match ensure_ytdlp(data_dir) {
         Some(p) => p,
         None => return json!({ "ok": false, "error": "no-ytdlp" }),
     };
 
-    // Run yt-dlp -J --no-playlist
+    // Run yt-dlp -J with speed-optimized flags from mdm.js
     let mut cmd = Command::new(&ytdlp);
-    cmd.args(["-J", "--no-playlist", "--socket-timeout", "20"]);
+    cmd.args([
+        "--ignore-config",
+        "--no-exec",
+        "--no-update",
+        "-J",
+        "--no-playlist",
+        "--no-warnings",
+        "--socket-timeout",
+        "15",
+    ]);
     if let Some(ff) = find_ffmpeg(data_dir) {
         cmd.arg("--ffmpeg-location");
         cmd.arg(ff.to_string_lossy().as_ref());
@@ -234,7 +269,25 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
 
     let output = match cmd.output() {
         Ok(out) if out.status.success() => out.stdout,
-        _ => return json!({ "ok": false, "error": "probe-failed" }),
+        _ => {
+            // Direct .ts / .m3u8 fallback if yt-dlp failed
+            if url.contains(".m3u8") || url.contains(".ts") {
+                let fallback = json!({
+                    "ok": true,
+                    "url": url,
+                    "title": req["title"].as_str().unwrap_or("Stream Video"),
+                    "choices": [
+                        { "id": "v-hls", "label": "HLS Stream", "tag": "HD", "height": 0, "size": 0, "kind": "video", "format_id": "best", "ext": "mp4" },
+                        { "id": "mp3", "label": "MP3 Audio", "tag": "320k", "height": 0, "size": 0, "kind": "audio", "format_id": "bestaudio/best", "ext": "mp3" }
+                    ]
+                });
+                if let Ok(mut cache) = PROBE_CACHE.lock() {
+                    cache.insert(url.clone(), ProbeCacheEntry { at: Instant::now(), data: fallback.clone() });
+                }
+                return fallback;
+            }
+            return json!({ "ok": false, "error": "probe-failed" });
+        }
     };
 
     let meta: Value = match serde_json::from_slice(&output) {
@@ -245,78 +298,150 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
     let title = meta["title"].as_str().unwrap_or("Video").to_string();
     let duration = meta["duration"].as_f64().unwrap_or(0.0);
 
-    // Build format choices
-    let mut choices = Vec::new();
+    // Size estimator from mdm.js
+    let est_size = |f: &Value| -> u64 {
+        if let Some(exact) = f["filesize"].as_u64().or_else(|| f["filesize_approx"].as_u64()) {
+            if exact > 0 {
+                return exact;
+            }
+        }
+        let rate = f["tbr"].as_f64().unwrap_or_else(|| {
+            f["vbr"].as_f64().unwrap_or(0.0) + f["abr"].as_f64().unwrap_or(0.0)
+        });
+        if duration > 0.0 && rate > 0.0 {
+            return (duration * rate * 125.0) as u64;
+        }
+        0
+    };
 
-    let mut has_1080 = false;
-    let mut has_720 = false;
-    let mut has_480 = false;
+    // Find best audio stream size (for DASH merging)
+    let mut best_audio_size = if duration > 0.0 { (duration * 140.0 * 125.0) as u64 } else { 0 };
+    if let Some(formats) = meta["formats"].as_array() {
+        let mut audio_only: Vec<&Value> = formats.iter().filter(|f| {
+            let ac = f["acodec"].as_str().unwrap_or("none");
+            let vc = f["vcodec"].as_str().unwrap_or("none");
+            ac != "none" && (vc == "none" || vc.is_empty())
+        }).collect();
+        audio_only.sort_by(|a, b| {
+            let ra = a["abr"].as_f64().or_else(|| a["tbr"].as_f64()).unwrap_or(0.0);
+            let rb = b["abr"].as_f64().or_else(|| b["tbr"].as_f64()).unwrap_or(0.0);
+            rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        if let Some(top_audio) = audio_only.first() {
+            let sz = est_size(top_audio);
+            if sz > 0 { best_audio_size = sz; }
+        }
+    }
+
+    // Group video streams by height
+    struct StreamInfo {
+        #[allow(dead_code)]
+        height: u64,
+        fps: u64,
+        size: u64,
+        score: f64,
+    }
+    let mut by_height: HashMap<u64, StreamInfo> = HashMap::new();
 
     if let Some(formats) = meta["formats"].as_array() {
         for f in formats {
-            if let Some(h) = f["height"].as_u64() {
-                if h >= 1080 { has_1080 = true; }
-                if h >= 720 { has_720 = true; }
-                if h >= 480 { has_480 = true; }
+            if f["has_drm"].as_bool() == Some(true) { continue; }
+            let vc = f["vcodec"].as_str().unwrap_or("none");
+            if vc == "none" || vc.is_empty() { continue; }
+            let h = f["height"].as_u64().unwrap_or(0);
+            if h == 0 { continue; }
+            let has_audio = f["acodec"].as_str().map(|a| a != "none").unwrap_or(false);
+            let v_size = est_size(f);
+            let total_size = if v_size > 0 {
+                if has_audio { v_size } else { v_size + best_audio_size }
+            } else {
+                0
+            };
+            let fps = f["fps"].as_u64().unwrap_or(0);
+            let tbr = f["tbr"].as_f64().or_else(|| f["vbr"].as_f64()).unwrap_or(0.0);
+            let score = (if total_size > 0 { 1e9 } else { 0.0 }) + (fps as f64) * 1e5 + tbr;
+
+            match by_height.get(&h) {
+                Some(prev) if prev.score >= score => {}
+                _ => {
+                    by_height.insert(h, StreamInfo { height: h, fps, size: total_size, score });
+                }
             }
         }
     }
 
-    let dur_min = (duration / 60.0).max(1.0);
+    let mut choices = Vec::new();
+    let mut heights: Vec<u64> = by_height.keys().cloned().collect();
+    heights.sort_by(|a, b| b.cmp(a)); // Descending order: 2160, 1440, 1080, 720, 480...
 
-    if has_1080 {
+    for h in heights {
+        let v = &by_height[&h];
+        let label = if h >= 2160 { "4K" } else if h >= 1440 { "2K" } else { &format!("{h}p") };
+        let tag = if v.fps > 30 {
+            format!("{}fps", v.fps)
+        } else if h >= 2160 {
+            "2160p".to_string()
+        } else if h >= 1440 {
+            "1440p".to_string()
+        } else if h >= 720 {
+            "HD".to_string()
+        } else {
+            "".to_string()
+        };
+
         choices.push(json!({
-            "label": "1080p FHD",
+            "id": format!("v-{h}"),
+            "label": label,
+            "tag": tag,
+            "height": h,
+            "size": v.size,
             "kind": "video",
-            "size": (dur_min * 2.8 * 1024.0 * 1024.0) as u64,
-            "note": "1080p · MP4",
-            "tag": "FHD",
-            "format_id": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+            "format_id": format!("bestvideo[height={h}]+bestaudio/best[height={h}]/bestvideo[height<={h}]+bestaudio/best[height<={h}]/best"),
             "ext": "mp4"
         }));
     }
 
-    if has_720 || !has_1080 {
+    // Generic fallback if no specific heights detected
+    if choices.is_empty() {
+        let fallback_size = if duration > 0.0 { (duration * 2.5 * 1024.0 * 1024.0 / 60.0).max(1.0) as u64 } else { 0 };
         choices.push(json!({
-            "label": "720p HD",
-            "kind": "video",
-            "size": (dur_min * 1.6 * 1024.0 * 1024.0) as u64,
-            "note": "720p · MP4",
+            "id": "v-best",
+            "label": "Best Video",
             "tag": "HD",
-            "format_id": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
-            "ext": "mp4"
-        }));
-    }
-
-    if has_480 {
-        choices.push(json!({
-            "label": "480p SD",
+            "height": 0,
+            "size": fallback_size,
             "kind": "video",
-            "size": (dur_min * 0.9 * 1024.0 * 1024.0) as u64,
-            "note": "480p · MP4",
-            "tag": "480p",
-            "format_id": "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
+            "format_id": "bestvideo+bestaudio/best",
             "ext": "mp4"
         }));
     }
 
-    // High Quality MP3 320k option
+    // Add MP3 (320 kbps)
+    let mp3_size = if duration > 0.0 { (duration * 320.0 * 125.0) as u64 } else { best_audio_size };
     choices.push(json!({
-        "label": "MP3 Audio (320k)",
-        "kind": "audio",
-        "size": (dur_min * 2.4 * 1024.0 * 1024.0) as u64,
-        "note": "320 kbps · MP3",
+        "id": "mp3",
+        "label": "MP3 Audio",
         "tag": "320k",
+        "height": 0,
+        "size": mp3_size,
+        "kind": "audio",
         "format_id": "bestaudio/best",
         "ext": "mp3"
     }));
 
-    json!({
+    let result = json!({
         "ok": true,
         "url": url,
         "title": title,
         "choices": choices
-    })
+    });
+
+    // Save in cache
+    if let Ok(mut cache) = PROBE_CACHE.lock() {
+        cache.insert(url, ProbeCacheEntry { at: Instant::now(), data: result.clone() });
+    }
+
+    result
 }
 
 /// Starts downloading the selected choice in the background.
@@ -336,15 +461,22 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
     let label = choice["label"].as_str().unwrap_or("video").to_string();
 
     let downloads_dir = PathBuf::from(nova_services::downloads::downloads_folder());
-    let template = downloads_dir.join("%(title)s.%(ext)s").to_string_lossy().into_owned();
+    let template = downloads_dir.join("%(title).150B [%(resolution)s].%(ext)s").to_string_lossy().into_owned();
 
     let mut args = Vec::new();
+    args.push("--ignore-config".to_string());
+    args.push("--no-exec".to_string());
+    args.push("--no-update".to_string());
     args.push("--no-playlist".to_string());
+    args.push("--continue".to_string());
     args.push("--windows-filenames".to_string());
+    args.push("-N".to_string());
+    args.push("8".to_string());
+    args.push("--hls-prefer-native".to_string());
     args.push("-o".to_string());
     args.push(template);
     args.push("--user-agent".to_string());
-    args.push("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".to_string());
+    args.push("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string());
     args.push("--referer".to_string());
     args.push(url.clone());
 
@@ -370,13 +502,13 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
         args.push(format!("{format_id}/best"));
         if ffmpeg.is_some() {
             args.push("--merge-output-format".to_string());
-            args.push("mp4".to_string());
+            args.push("mp4/mkv".to_string());
         }
     }
 
     args.push(url);
 
-    // Spawn yt-dlp in the background so it doesn't block
+    // Spawn yt-dlp in the background so it doesn't block the UI thread
     std::thread::spawn(move || {
         let mut cmd = Command::new(&ytdlp);
         cmd.args(&args);
