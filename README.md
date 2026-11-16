@@ -62,6 +62,16 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.8
+
+**Video downloader (MDM)** — download any video or high-quality MP3 stream from the browser in one click. Hover the download button to pre-fetch formats instantly; pick 4K, 1080p, 720p, 480p, 360p or MP3 320 k from the quality drawer. Requires [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org/) in PATH or beside the app.
+
+**QuickClips manager** — save up to 200 text snippets, pin the ones you use most, copy any clip back to the clipboard in one click, and add from clipboard with the paste button. Clips are stored locally (`userData/clips.json`); nothing leaves your machine.
+
+**IDM Nova downloads** — progress, speed, time left and ETA for each active IDM Nova download shown directly on the island; pause, resume, cancel or open/reveal a file without switching windows.
+
+**Smart clipboard** — copy a URL, a math expression (e.g. `12 * 4 + 8`) or a hex/RGB color and the island shows the right action: open/download the link, compute the result with one tap to copy it, or preview the color swatch.
+
 ## Build from source
 
 Nova Island is written in Rust; the app is in [`nova-next/`](nova-next/). You need Windows 10/11 and
