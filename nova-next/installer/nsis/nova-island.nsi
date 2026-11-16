@@ -223,6 +223,7 @@ Section "Install"
     MessageBox MB_ICONSTOP "Nova Island is still running and couldn't be replaced. Close it and run the installer again." /SD IDOK
     Abort
   ${EndIf}
+  File "${DLL}"
   WriteUninstaller "$INSTDIR\Uninstall ${APP}.exe"
 
   ; Installed apps
@@ -271,6 +272,7 @@ FunctionEnd
 Section "Uninstall"
   !insertmacro CloseApp
   Delete "$INSTDIR\${APP}.exe"
+  Delete "$INSTDIR\WebView2Loader.dll"
   Delete "$INSTDIR\Uninstall ${APP}.exe"
   RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\${APP}.lnk"

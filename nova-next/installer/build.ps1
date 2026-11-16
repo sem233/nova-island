@@ -18,12 +18,14 @@ $version = (Select-String -Path "$next\crates\nova-app\Cargo.toml" -Pattern '^ve
 Write-Host "Nova Island $version"
 
 Push-Location $next
-cargo build --release -p nova-app
+cargo +stable-x86_64-pc-windows-gnu build --release -p nova-app
 if ($LASTEXITCODE) { throw 'cargo build failed' }
 Pop-Location
 
-python "$here\nsis\make-art.py"
-if ($LASTEXITCODE) { throw 'make-art failed' }
+if (-not (Test-Path "$here\nsis\art\header.bmp") -or -not (Test-Path "$here\nsis\art\sidebar.bmp")) {
+  python "$here\nsis\make-art.py"
+  if ($LASTEXITCODE) { throw 'make-art failed' }
+}
 
 # NSIS 3: the copy electron-builder kept (what 1.7 was built with), else an installed one or one on PATH
 $makensis = @(
@@ -34,16 +36,25 @@ $makensis = @(
 ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $makensis) { throw 'NSIS 3 (makensis.exe) not found: install it from nsis.sourceforge.io' }
 New-Item -ItemType Directory -Force "$target\dist" | Out-Null
+$dll = "$target\release\WebView2Loader.dll"
+if (-not (Test-Path $dll)) {
+  $foundDll = Get-ChildItem -Path "$target" -Recurse -Filter "WebView2Loader.dll" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+  if ($foundDll) { Copy-Item $foundDll.FullName $dll -Force }
+}
 $out = "$target\dist\Nova-Island-Setup-$version.exe"
+$outPortable = "$target\dist\Nova-Island-$version-Portable.exe"
+$icon = (Split-Path -Parent $next) + "\build\icon.ico"
 Push-Location "$here\nsis"
-& $makensis /V2 "/DVERSION=$version" "/DEXE=$target\release\nova-island.exe" "/DOUT=$out" nova-island.nsi
-if ($LASTEXITCODE) { throw 'makensis failed' }
+& $makensis /V2 "/DVERSION=$version" "/DEXE=$target\release\nova-island.exe" "/DDLL=$dll" "/DOUT=$out" nova-island.nsi
+if ($LASTEXITCODE) { throw 'makensis setup failed' }
+& $makensis /V2 "/DVERSION=$version" "/DEXE=$target\release\nova-island.exe" "/DDLL=$dll" "/DICON=$icon" "/DOUT=$outPortable" portable.nsi
+if ($LASTEXITCODE) { throw 'makensis portable failed' }
 Pop-Location
 
 # (1.8.7) the symbols of this very exe, kept with the installer: a crash's offsets (Partner Center,
 # Windows Error Reporting) can then be read as function names and lines
 New-Item -ItemType Directory -Force "$target\dist\symbols\$version" | Out-Null
-Copy-Item "$target\release\nova_island.pdb" "$target\dist\symbols\$version\nova_island.pdb" -Force
+Copy-Item "$target\release\nova_island.pdb" "$target\dist\symbols\$version\nova_island.pdb" -Force -ErrorAction SilentlyContinue
 Copy-Item "$target\release\nova-island.exe" "$target\dist\symbols\$version\Nova Island.exe" -Force
 
 $f = Get-Item $out
