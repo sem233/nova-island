@@ -133,7 +133,7 @@ fn local_zone() -> String {
 }
 
 /// A DTSTART/DTEND/EXDATE/RECURRENCE-ID value: (ms, date-only, wall ms, zone for wall times)
-fn parse_date(value: &str, ps: &[(String, String)]) -> Option<(When, f64, Option<String>)> {
+fn parse_date(value: &str, ps: &[(String, String)], local_tz: &str) -> Option<(When, f64, Option<String>)> {
     let v = value.trim();
     let digits = |s: &str| s.parse::<i64>().ok();
     let date_only = matches!(param(ps, "VALUE").map(|s| s.to_ascii_uppercase()).as_deref(), Some("DATE")) || (v.len() == 8 && v.bytes().all(|b| b.is_ascii_digit()));
@@ -141,7 +141,7 @@ fn parse_date(value: &str, ps: &[(String, String)]) -> Option<(When, f64, Option
     let day_ms = (nova_prayer::days_from_civil(y, m, d) * 86_400_000) as f64;
     if date_only {
         // all-day: local midnight of that date (only its length matters to calendar.js)
-        let zone = local_zone();
+        let zone = local_tz.to_string();
         let ms = nova_prayer::local_to_utc(&zone, day_ms)?;
         return Some((When { ms, date_only: true }, day_ms, Some(zone)));
     }
@@ -159,7 +159,7 @@ fn parse_date(value: &str, ps: &[(String, String)]) -> Option<(When, f64, Option
         // a floating time is read in the PC's zone once; a series then repeats it in UTC (node-ical
         // keeps no zone for it), so it moves an hour on the clock after a DST change, as in 1.7
         None => {
-            let ms = nova_prayer::local_to_utc(&local_zone(), wall).unwrap_or(wall);
+            let ms = nova_prayer::local_to_utc(local_tz, wall).unwrap_or(wall);
             Some((When { ms, date_only: false }, ms, None))
         }
     }
@@ -213,7 +213,7 @@ fn unfold(ics: &str) -> Vec<String> {
 }
 
 /// Parses the feed into its series (by UID) with moved/cancelled occurrences attached.
-fn parse(ics: &str) -> Vec<(Event, Vec<Event>)> {
+fn parse(ics: &str, local_tz: &str) -> Vec<(Event, Vec<Event>)> {
     let mut series: Vec<(Event, Vec<Event>)> = Vec::new();
     let mut overrides: Vec<Event> = Vec::new();
     let mut cur: Option<Event> = None;
@@ -251,23 +251,23 @@ fn parse(ics: &str) -> Vec<(Event, Vec<Event>)> {
                     "X-GOOGLE-CONFERENCE" => ev.x_google.add(text_field()),
                     "STATUS" => ev.status = value.trim().to_ascii_uppercase(),
                     "DTSTART" if ev.start.is_none() => {
-                        if let Some((w, wall, zone)) = parse_date(value, &ps) {
+                        if let Some((w, wall, zone)) = parse_date(value, &ps, local_tz) {
                             ev.start = Some(w);
                             ev.start_wall = Some((wall, zone));
                         }
                     }
-                    "DTEND" if ev.end.is_none() => ev.end = parse_date(value, &ps).map(|x| x.0),
+                    "DTEND" if ev.end.is_none() => ev.end = parse_date(value, &ps, local_tz).map(|x| x.0),
                     "DURATION" => ev.duration_ms = parse_duration(value),
                     "RRULE" => ev.rrule = Some(value.to_string()),
                     "EXDATE" => {
                         for v in value.split(',') {
-                            if let Some((w, _, _)) = parse_date(v, &ps) {
+                            if let Some((w, _, _)) = parse_date(v, &ps, local_tz) {
                                 ev.exdate.push(w.ms);
                             }
                         }
                     }
                     "RECURRENCE-ID" => {
-                        if let Some((w, wall, _)) = parse_date(value, &ps) {
+                        if let Some((w, wall, _)) = parse_date(value, &ps, local_tz) {
                             // (1.8.7) the occurrence it replaces is found by its exact time. Only a
                             // floating id (no zone, no Z) keeps 1.7's date match, as its series is
                             // repeated in UTC and can be an hour away after a DST change. (1.7 matched
@@ -325,7 +325,7 @@ fn days_in_month(y: i64, m: u32) -> u32 {
 }
 
 /// RRULE occurrences (UTC ms) from the series start, in its own time zone, up to `until_ms`.
-fn expand(rule: &str, start_ms: f64, wall: f64, zone: Option<&str>, limit_ms: f64) -> Vec<f64> {
+fn expand(rule: &str, start_ms: f64, wall: f64, zone: Option<&str>, local_tz: &str, limit_ms: f64) -> Vec<f64> {
     let mut freq = "";
     let mut interval = 1i64;
     let mut count: Option<usize> = None;
@@ -343,7 +343,7 @@ fn expand(rule: &str, start_ms: f64, wall: f64, zone: Option<&str>, limit_ms: f6
             "INTERVAL" => interval = v.parse().unwrap_or(1).max(1),
             "COUNT" => count = v.parse().ok(),
             "UNTIL" => {
-                until = parse_date(v, &[]).map(|(w, wl, _)| if v.trim().ends_with('Z') || v.len() == 8 { w.ms } else { zone.and_then(|z| nova_prayer::local_to_utc(z, wl)).unwrap_or(w.ms) })
+                until = parse_date(v, &[], local_tz).map(|(w, wl, _)| if v.trim().ends_with('Z') || v.len() == 8 { w.ms } else { zone.and_then(|z| nova_prayer::local_to_utc(z, wl)).unwrap_or(w.ms) })
             }
             "BYDAY" => {
                 for d in v.split(',') {
@@ -499,8 +499,13 @@ fn expand(rule: &str, start_ms: f64, wall: f64, zone: Option<&str>, limit_ms: f6
 
 /// calendar.js occurrences(): every occurrence touching [from, to), at most 12, by start time.
 pub fn occurrences(ics: &str, from: f64, to: f64) -> Vec<Value> {
+    occurrences_in_zone(ics, from, to, &local_zone())
+}
+
+/// Same as `occurrences`, using an explicit local time zone for floating / all-day timestamps.
+pub fn occurrences_in_zone(ics: &str, from: f64, to: f64, local_tz: &str) -> Vec<Value> {
     let mut out: Vec<(f64, Value)> = Vec::new();
-    for (ev, moved) in parse(ics) {
+    for (ev, moved) in parse(ics, local_tz) {
         let Some(start) = ev.start else { continue };
         if ev.status == "CANCELLED" {
             continue;
@@ -520,7 +525,7 @@ pub fn occurrences(ics: &str, from: f64, to: f64) -> Vec<Value> {
         };
         match (&ev.rrule, ev.start_wall.as_ref()) {
             (Some(rule), Some((wall, zone))) => {
-                for s in expand(rule, start.ms, *wall, zone.as_deref(), to) {
+                for s in expand(rule, start.ms, *wall, zone.as_deref(), local_tz, to) {
                     if s < from - dur {
                         continue;
                     }
@@ -665,5 +670,21 @@ pub mod service {
             s["hasUrl"] = json!(self.has_url());
             s
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::occurrences_in_zone;
+
+    #[test]
+    fn floating_event_respects_explicit_local_zone() {
+        let ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:u1@nova\r\nDTSTART:20261117T120000\r\nDTEND:20261117T130000\r\nSUMMARY:Lunch\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let day_ms = (nova_prayer::days_from_civil(2026, 11, 17) * 86_400_000) as f64;
+        let utc_ev = occurrences_in_zone(ics, day_ms, day_ms + 86_400_000.0, "UTC");
+        let cairo_ev = occurrences_in_zone(ics, day_ms, day_ms + 86_400_000.0, "Africa/Cairo");
+        assert_eq!(utc_ev[0]["start"].as_i64(), Some(day_ms as i64 + 12 * 3_600_000));
+        // Egypt standard time in November is UTC+2 -> 12:00 Cairo == 10:00 UTC.
+        assert_eq!(cairo_ev[0]["start"].as_i64(), Some(day_ms as i64 + 10 * 3_600_000));
     }
 }

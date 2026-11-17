@@ -14,7 +14,8 @@ fn calendar_like_calendar_js() {
         let ics = c["ics"].as_str().unwrap();
         for (i, now) in c["now"].as_array().unwrap().iter().enumerate() {
             let now = now.as_f64().unwrap();
-            let got = Value::Array(nova_services::calendar::occurrences(ics, now, now + 86_400_000.0));
+            // Floating times in `parity/fixtures/calendar.json` were generated under `Africa/Cairo`.
+            let got = Value::Array(nova_services::calendar::occurrences_in_zone(ics, now, now + 86_400_000.0, "Africa/Cairo"));
             total += 1;
             // (1.8.7) calendar.js cancels the wrong day here: RECURRENCE-ID 20 Nov 21:00 Pacific is
             // matched by its written date to the UTC date of the 19th's meeting (20 Nov 05:00 UTC).
