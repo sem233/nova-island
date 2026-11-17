@@ -1,0 +1,344 @@
+/* ============================================================
+   Island Calculator add-on (style-calculator.css)
+   Compact 260x340 panel growing from the expanded topbar icon.
+   Inherits theme tokens (dark/light/glass/solid) & perf flags.
+   ============================================================ */
+
+/* Topbar entry button matching .gear without rotating on hover */
+.gear.calc-btn {
+  transition: color var(--dur-fast), background var(--dur-fast), transform 80ms ease-out;
+}
+.gear.calc-btn:hover {
+  transform: none;
+  color: var(--text-1);
+  background: var(--fill-1);
+}
+.gear.calc-btn:active {
+  transform: scale(0.92);
+}
+.gear.calc-btn.on {
+  color: var(--text-1);
+  background: var(--fill-2);
+}
+
+/* Floating calculator panel */
+.calc-panel {
+  position: fixed;
+  z-index: 30;
+  width: 260px;
+  height: 340px;
+  direction: ltr;
+  unicode-bidi: isolate;
+  opacity: 0;
+  transform: translate3d(0, var(--calc-slide-y, -8px), 0) scale(0.92);
+  transform-origin: var(--calc-origin-x, 86%) var(--calc-origin-y, top);
+  pointer-events: none;
+  transition: opacity 140ms ease-out, transform 140ms ease-out;
+  user-select: none;
+  outline: none;
+  border-radius: var(--th-radius, 22px);
+}
+.calc-panel:not([hidden]) {
+  will-change: opacity, transform;
+}
+.calc-panel.open {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  pointer-events: auto;
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+.calc-clip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--th-radius, 22px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+  box-sizing: border-box;
+  font-family: var(--th-font, var(--font));
+  color: var(--th-text, var(--text-1));
+  background: rgba(16, 16, 22, 0.72);
+  box-shadow: var(
+    --calc-shadow,
+    0 2px 6px rgba(0, 0, 0, 0.24),
+    0 20px 50px -10px rgba(0, 0, 0, 0.65),
+    0 0 0 0.5px rgba(0, 0, 0, 0.45)
+  );
+}
+
+/* Match glass / solid / recorder fallback behavior from style.css */
+body[data-theme] .calc-clip {
+  background: var(--th-bg, transparent);
+}
+.calc-bd {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: block;
+}
+.calc-tint,
+.calc-deco,
+.calc-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+.calc-tint {
+  background: var(--th-tint-strong, var(--th-tint, rgba(14, 14, 20, 0.62)));
+}
+.calc-deco {
+  background: var(--th-deco, none);
+}
+.calc-sheen {
+  box-shadow: inset 0 0 0 var(--th-line-w, 1px) var(--th-line, rgba(255, 255, 255, 0.14));
+}
+
+body.th-solid .calc-bd,
+body.no-blur .calc-bd,
+body.th-rec .calc-bd {
+  display: none;
+}
+body.th-solid .calc-clip,
+body.no-blur .calc-clip {
+  background: var(--th-bg, var(--th-solid, rgb(28, 30, 38)));
+}
+body.th-rec:not(.th-solid) .calc-clip {
+  background: var(--th-solid, rgb(28, 30, 38));
+}
+body.th-solid .calc-tint,
+body.no-blur:not([data-theme]) .calc-tint {
+  background: transparent;
+}
+body[data-theme].no-blur .calc-tint,
+body[data-theme].th-rec:not(.th-solid) .calc-tint {
+  background: transparent;
+}
+
+/* Foreground content above backdrop layers */
+.calc-display,
+.calc-grid {
+  position: relative;
+  z-index: 2;
+}
+
+/* Display: expression + live preview */
+.calc-display {
+  flex: none;
+  height: 82px;
+  padding: 10px 12px 9px;
+  box-sizing: border-box;
+  border-radius: calc(var(--th-radius, 22px) - 8px);
+  background: var(--calc-disp-bg, rgba(255, 255, 255, 0.06));
+  box-shadow: inset 0 0 0 0.5px var(--calc-disp-stroke, rgba(255, 255, 255, 0.1));
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  direction: ltr;
+}
+
+.calc-expr {
+  height: 34px;
+  line-height: 34px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--th-text, var(--text-1));
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scrollbar-width: none;
+  direction: ltr;
+  unicode-bidi: plaintext;
+}
+.calc-expr::-webkit-scrollbar {
+  display: none;
+}
+.calc-expr.empty::before {
+  content: "0";
+  color: var(--th-soft, var(--text-3));
+  opacity: 0.5;
+}
+.calc-expr.sm1 {
+  font-size: 18px;
+}
+.calc-expr.sm2 {
+  font-size: 15px;
+}
+.calc-expr.sm3 {
+  font-size: 13px;
+}
+
+.calc-res {
+  min-height: 22px;
+  line-height: 22px;
+  font-size: 13.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--th-soft, var(--text-2));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 1;
+  transition: opacity 90ms ease-out;
+}
+.calc-res.fade {
+  opacity: 0.25;
+}
+.calc-res.err {
+  color: var(--calc-err-fg, #ff6b6b);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 4-column keypad grid */
+.calc-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 6px;
+  direction: ltr;
+}
+
+.calc-key {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: calc(var(--th-radius, 22px) - 10px);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--th-text, var(--text-1));
+  background: var(--calc-key-bg, rgba(255, 255, 255, 0.08));
+  box-shadow: inset 0 0 0 0.5px var(--calc-key-stroke, rgba(255, 255, 255, 0.1));
+  transition: transform 80ms ease-out, background 80ms ease-out, color 80ms ease-out, box-shadow 80ms ease-out;
+}
+.calc-key:hover {
+  background: var(--calc-key-hover, rgba(255, 255, 255, 0.15));
+}
+.calc-key:active,
+.calc-key.pressed {
+  transform: scale(0.96);
+}
+.calc-key:focus-visible {
+  box-shadow: inset 0 0 0 1.5px var(--th-hi, #8cc8ff);
+  outline: none;
+}
+
+.calc-key.calc-fn {
+  background: var(--calc-fn-bg, rgba(255, 255, 255, 0.13));
+  color: var(--calc-fn-fg, var(--th-soft, var(--text-2)));
+  font-size: 14px;
+}
+.calc-key.calc-fn:hover {
+  background: var(--calc-fn-hover, rgba(255, 255, 255, 0.2));
+  color: var(--th-text, var(--text-1));
+}
+
+.calc-key.calc-op {
+  background: var(--calc-op-bg, rgba(var(--accent-rgb, 10, 132, 255), 0.18));
+  color: var(--calc-op-fg, var(--th-hi, #8cc8ff));
+  font-size: 17px;
+  font-weight: 600;
+}
+.calc-key.calc-op:hover {
+  background: var(--calc-op-hover, rgba(var(--accent-rgb, 10, 132, 255), 0.28));
+}
+
+.calc-key.calc-eq {
+  grid-column: 4;
+  grid-row: 4 / 6;
+  height: 100%;
+  background: var(--calc-eq-bg, rgba(var(--accent-rgb, 10, 132, 255), 0.92));
+  color: var(--calc-eq-fg, #ffffff);
+  font-size: 19px;
+  font-weight: 700;
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.25), 0 4px 12px rgba(0, 0, 0, 0.22);
+}
+.calc-key.calc-eq:hover {
+  background: var(--calc-eq-hover, rgba(var(--accent-rgb, 10, 132, 255), 1));
+}
+
+.calc-key.calc-zero {
+  grid-column: 1 / 3;
+}
+
+/* Light theme (Nody) adjustments */
+body[data-theme="nody"] .calc-panel {
+  --calc-shadow: 0 2px 8px rgba(131, 24, 67, 0.14), 0 18px 42px -8px rgba(131, 24, 67, 0.26), 0 0 0 0.5px rgba(244, 114, 182, 0.35);
+  --calc-disp-bg: rgba(255, 255, 255, 0.62);
+  --calc-disp-stroke: rgba(244, 114, 182, 0.28);
+  --calc-key-bg: rgba(255, 255, 255, 0.72);
+  --calc-key-hover: rgba(255, 255, 255, 0.94);
+  --calc-key-stroke: rgba(244, 114, 182, 0.24);
+  --calc-fn-bg: rgba(131, 24, 67, 0.08);
+  --calc-fn-hover: rgba(131, 24, 67, 0.14);
+  --calc-fn-fg: #831843;
+  --calc-op-bg: rgba(236, 72, 153, 0.15);
+  --calc-op-hover: rgba(236, 72, 153, 0.25);
+  --calc-op-fg: #be185d;
+  --calc-eq-bg: #db2777;
+  --calc-eq-hover: #be185d;
+  --calc-eq-fg: #ffffff;
+  --calc-err-fg: #be123c;
+}
+
+/* Retro pixel-green terminal theme */
+body[data-theme="retro"] .calc-panel {
+  --calc-disp-bg: rgba(74, 222, 128, 0.06);
+  --calc-disp-stroke: rgba(74, 222, 128, 0.3);
+  --calc-key-bg: rgba(74, 222, 128, 0.08);
+  --calc-key-hover: rgba(74, 222, 128, 0.18);
+  --calc-key-stroke: rgba(74, 222, 128, 0.25);
+  --calc-fn-bg: rgba(74, 222, 128, 0.12);
+  --calc-fn-hover: rgba(74, 222, 128, 0.22);
+  --calc-fn-fg: #86efac;
+  --calc-op-bg: rgba(74, 222, 128, 0.2);
+  --calc-op-hover: rgba(74, 222, 128, 0.32);
+  --calc-op-fg: #bbf7d0;
+  --calc-eq-bg: #22c55e;
+  --calc-eq-hover: #4ade80;
+  --calc-eq-fg: #052e16;
+  --calc-err-fg: #f87171;
+}
+
+/* High-contrast / dark themes with custom highlight tints (Bakka, Aurora, Snow, Galaxy, Lava, Madar) */
+body[data-theme="bakka"] .calc-panel {
+  --calc-op-bg: rgba(246, 216, 138, 0.16);
+  --calc-op-hover: rgba(246, 216, 138, 0.28);
+  --calc-eq-bg: #c9a54c;
+  --calc-eq-hover: #dbb962;
+  --calc-eq-fg: #0b261f;
+}
+body[data-theme="madar"] .calc-panel {
+  --calc-op-bg: rgba(94, 234, 212, 0.15);
+  --calc-op-hover: rgba(94, 234, 212, 0.26);
+  --calc-eq-bg: #14b8a6;
+  --calc-eq-hover: #2dd4bf;
+  --calc-eq-fg: #042f2e;
+}
+
+/* Remove animations / Battery saver: zero motion */
+body.no-anim .calc-panel,
+body.no-anim .calc-panel * {
+  transition: none !important;
+  animation: none !important;
+}

@@ -31,8 +31,8 @@ const OVERLAY_PRELOADS: &[&str] = &["radio/preload.js", "tasks/preload.js"];
 const PATCHES: &[(&str, &str, &str)] = &[
     // Quran Radio plays surahs from mp3quran's server (1.8)
     ("index.html", "https://qurango.net https://*.qurango.net", "https://qurango.net https://*.qurango.net https://cdn.mp3quran.net"),
-    // the island's own styles in 1.8 (style-2.css), after 1.7's, plus QuickClips & MDM
-    ("index.html", "  <link rel=\"stylesheet\" href=\"style.css\">\n", "  <link rel=\"stylesheet\" href=\"style.css\">\n  <link rel=\"stylesheet\" href=\"style-2.css\">\n  <link rel=\"stylesheet\" href=\"style-quickclips.css\">\n"),
+    // the island's own styles in 1.8 (style-2.css), after 1.7's, plus QuickClips, MDM & Calculator
+    ("index.html", "  <link rel=\"stylesheet\" href=\"style.css\">\n", "  <link rel=\"stylesheet\" href=\"style.css\">\n  <link rel=\"stylesheet\" href=\"style-2.css\">\n  <link rel=\"stylesheet\" href=\"style-quickclips.css\">\n  <link rel=\"stylesheet\" href=\"style-calculator.css\">\n"),
     // the radio window and the radio's state for it, and opening the app of a notification (1.8)
     (
         "preload.js",
@@ -166,7 +166,7 @@ const PATCHES: &[(&str, &str, &str)] = &[
         "                  <span id=\"vol-pct\" class=\"vol-pct\"></span>\n                </div>\n              </div>\n            </div>\n",
         "                  <span id=\"vol-pct\" class=\"vol-pct\"></span>\n                </div>\n              </div>\n              <div class=\"vdl-drawer\" id=\"vdl-drawer\"><div class=\"vdl-list\" id=\"vdl-list\"></div></div>\n            </div>\n",
     ),
-    ("index.html", "  <script src=\"views/radio.js\"></script>\n", "  <script src=\"views/radio.js\"></script>\n  <script src=\"views/tasks.js\"></script>\n  <script src=\"views/quickclips.js\"></script>\n  <script src=\"views/vdl.js\"></script>\n"),
+    ("index.html", "  <script src=\"views/radio.js\"></script>\n", "  <script src=\"views/radio.js\"></script>\n  <script src=\"views/tasks.js\"></script>\n  <script src=\"views/quickclips.js\"></script>\n  <script src=\"views/vdl.js\"></script>\n  <script src=\"views/calculator.js\"></script>\n"),
     ("renderer.js", "t === 'radio' ? !state.radioTab : ", "t === 'radio' ? !state.radioTab : t === 'tasks' ? !state.tasksTab : t === 'quickclips' ? false : "),
     (
         "renderer.js",
@@ -181,12 +181,12 @@ const PATCHES: &[(&str, &str, &str)] = &[
     (
         "renderer.js",
         "bridge.onToggle(() => {\n  state.pinned = !state.pinned;\n",
-        "window.state = state;\nwindow.render = render;\nwindow.setVdlHold = (on) => {\n  const hold = !!on;\n  if (state.vdlHold === hold) return hold;\n  state.vdlHold = hold;\n  bridge.setPinned(Boolean(state.pinned || state.vdlHold));\n  render();\n  return hold;\n};\nwindow.togglePin = (force) => {\n  state.pinned = typeof force === 'boolean' ? force : !state.pinned;\n  if (!state.pinned) { state.hover = false; state.vdlHold = false; }\n  bridge.setPinned(Boolean(state.pinned || state.vdlHold));\n  render();\n  window.dispatchEvent(new CustomEvent('island:pinned', { detail: { pinned: state.pinned } }));\n  return state.pinned;\n};\nbridge.onToggle(() => {\n  window.togglePin();\n",
+        "window.state = state;\nwindow.render = render;\nwindow.setVdlHold = (on) => {\n  const hold = !!on;\n  if (state.vdlHold === hold) return hold;\n  state.vdlHold = hold;\n  bridge.setPinned(Boolean(state.pinned || state.vdlHold || state.calcHold));\n  render();\n  return hold;\n};\nwindow.setCalcHold = (on) => {\n  const hold = !!on;\n  if (state.calcHold === hold) return hold;\n  state.calcHold = hold;\n  bridge.setPinned(Boolean(state.pinned || state.vdlHold || state.calcHold));\n  render();\n  return hold;\n};\nwindow.togglePin = (force) => {\n  state.pinned = typeof force === 'boolean' ? force : !state.pinned;\n  if (!state.pinned) { state.hover = false; state.vdlHold = false; state.calcHold = false; }\n  bridge.setPinned(Boolean(state.pinned || state.vdlHold || state.calcHold));\n  render();\n  window.dispatchEvent(new CustomEvent('island:pinned', { detail: { pinned: state.pinned } }));\n  return state.pinned;\n};\nbridge.onToggle(() => {\n  window.togglePin();\n",
     ),
     (
         "renderer.js",
         "  if (state.toastAction && state.toast && now < state.toastUntil && !state.pinned) return 'toast';\n  // a reminder stays put under the cursor so it can be read (hovering pauses it)\n  if (state.reminderUntil > now && !state.pinned && !state.dragging) {\n    return state.toast && now < state.toastUntil ? 'toast' : 'reminder';\n  }\n  if (!state.moving && (state.hover || state.pinned || state.dragging)) return 'expanded';\n",
-        "  if (state.toastAction && state.toast && now < state.toastUntil && !state.pinned && !state.vdlHold) return 'toast';\n  // a reminder stays put under the cursor so it can be read (hovering pauses it)\n  if (state.reminderUntil > now && !state.pinned && !state.vdlHold && !state.dragging) {\n    return state.toast && now < state.toastUntil ? 'toast' : 'reminder';\n  }\n  if (!state.moving && (state.hover || state.pinned || state.vdlHold || state.dragging)) return 'expanded';\n",
+        "  if (state.toastAction && state.toast && now < state.toastUntil && !state.pinned && !state.vdlHold && !state.calcHold) return 'toast';\n  // a reminder stays put under the cursor so it can be read (hovering pauses it)\n  if (state.reminderUntil > now && !state.pinned && !state.vdlHold && !state.calcHold && !state.dragging) {\n    return state.toast && now < state.toastUntil ? 'toast' : 'reminder';\n  }\n  if (!state.moving && (state.hover || state.pinned || state.vdlHold || state.calcHold || state.dragging)) return 'expanded';\n",
     ),
     (
         "renderer.js",
@@ -255,12 +255,12 @@ const PATCHES: &[(&str, &str, &str)] = &[
     (
         "prefs/index.html",
         "            <label class=\"row\" id=\"update-row\"><b>Auto-update</b><input type=\"checkbox\" class=\"sw\" data-feature=\"autoUpdate\"></label>\n",
-        "            <label class=\"row\" id=\"update-row\"><b>Auto-update</b><input type=\"checkbox\" class=\"sw\" data-feature=\"autoUpdate\"></label>\n            <div class=\"row\" id=\"update-check-row\"><div class=\"txt\"><b>Check for updates</b><small id=\"upd-status\"><span class=\"upd-msg\">Version</span> <span class=\"upd-ver\" data-no-i18n></span></small></div><button class=\"btn\" id=\"upd-check\">Check now</button></div>\n",
+        "            <label class=\"row\" id=\"update-row\"><b>Auto-update</b><input type=\"checkbox\" class=\"sw\" data-feature=\"autoUpdate\"></label>\n            <div class=\"row\" id=\"update-check-row\"><div class=\"txt\"><b>Check for updates</b><small id=\"upd-status\"><span class=\"upd-msg\">Version</span> <span class=\"upd-ver\" data-no-i18n></span></small></div><button class=\"btn\" id=\"upd-check\">Check now</button></div>\n            <div class=\"row\" id=\"update-check-fork-row\"><div class=\"txt\"><b>Check fork updates</b><small id=\"upd-fork-status\"><span class=\"upd-msg\">sem233/nova-island</span> <span class=\"upd-ver\" data-no-i18n></span></small></div><button class=\"btn\" id=\"upd-check-fork\">Check fork</button></div>\n",
     ),
     (
         "prefs/preload.js",
         "  onWidgets: on('widgets'),\n",
-        "  onWidgets: on('widgets'),\n  updateState: () => ipcRenderer.invoke('update-state'),\n  updateNow: () => ipcRenderer.send('update-now'),\n  onUpdate: on('update'),\n  checkUpdates: () => ipcRenderer.send('update-check'),\n  onUpdateCheck: on('update-check'),\n",
+        "  onWidgets: on('widgets'),\n  updateState: () => ipcRenderer.invoke('update-state'),\n  updateNow: () => ipcRenderer.send('update-now'),\n  onUpdate: on('update'),\n  checkUpdates: (src) => ipcRenderer.send('update-check', src),\n  onUpdateCheck: on('update-check'),\n",
     ),
     ("preload.js", "  onUpdate: on('update'),\n", "  onUpdate: on('update'),\n  onUpdateNow: on('update-now'),\n"),
     // Copy the reminder (1.8.6): a button beside the card's close one (pages/views/reminders-copy.js)
@@ -500,7 +500,35 @@ const PATCHES: &[(&str, &str, &str)] = &[
     ("preload.js", r##"  network: () => ipcRenderer.invoke('net-get'),
 "##, r##"  network: () => ipcRenderer.invoke('net-get'),
   onAdhanFile: on('adhan-file'),
+  calcOpen: (on, blur) => ipcRenderer.send('calc-open', on, blur),
+  calcRect: (r) => ipcRenderer.send('calc-rect', r),
+  onCalcClose: on('calc-close'),
 "##),
+    (
+        "index.html",
+        "            <button class=\"gear bell\" id=\"open-news\" title=\"News from Nova\" aria-label=\"News from Nova\">",
+        "            <button class=\"gear calc-btn\" id=\"open-calc\" title=\"Calculator\" aria-label=\"Calculator\" aria-expanded=\"false\" hidden><svg class=\"s\" viewBox=\"0 0 24 24\"><rect x=\"4\" y=\"2.5\" width=\"16\" height=\"19\" rx=\"3\"/><path d=\"M8 7h8\"/><path d=\"M8 12h2M14 12h2M8 16h2M14 16h2\"/></svg></button>\n            <button class=\"gear bell\" id=\"open-news\" title=\"News from Nova\" aria-label=\"News from Nova\">",
+    ),
+    (
+        "index.html",
+        "  <script src=\"time-format.js\"></script>\n  <script src=\"renderer.js\"></script>\n",
+        "  <section id=\"calc-panel\" class=\"calc-panel\" dir=\"ltr\" lang=\"en\" role=\"dialog\" aria-modal=\"false\" aria-label=\"Calculator\" tabindex=\"-1\" hidden></section>\n  <script src=\"time-format.js\"></script>\n  <script src=\"renderer.js\"></script>\n",
+    ),
+    (
+        "renderer.js",
+        "function sizeCanvases() {\n  [bd, off].forEach((c) => {\n    c.width = window.innerWidth;\n    c.height = window.innerHeight;\n  });\n  bd.style.width = `${window.innerWidth}px`;\n  bd.style.height = `${window.innerHeight}px`;\n}",
+        "window.__getBackdropCanvas = () => off;\nfunction sizeCanvases() {\n  let prev = null;\n  if (off.width > 0 && off.height > 0 && window.innerWidth === off.width) {\n    prev = document.createElement('canvas');\n    prev.width = off.width;\n    prev.height = off.height;\n    prev.getContext('2d').drawImage(off, 0, 0);\n  }\n  [bd, off].forEach((c) => {\n    c.width = window.innerWidth;\n    c.height = window.innerHeight;\n  });\n  if (prev) {\n    offCtx.drawImage(prev, 0, 0);\n    bdCtx.drawImage(prev, 0, 0);\n  }\n  bd.style.width = `${window.innerWidth}px`;\n  bd.style.height = `${window.innerHeight}px`;\n}",
+    ),
+    (
+        "renderer.js",
+        "  fadeFrames = 10;\n  wake(300);\n});",
+        "  fadeFrames = 10;\n  wake(300);\n  window.dispatchEvent(new CustomEvent('island:backdrop'));\n});",
+    ),
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><div class=\"txt\"><b>Open apps first</b><small>Apps with a window open come first in the Apps tab</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"appsRunningFirst\"></label>\n          </div>\n        </div>\n",
+        "            <label class=\"row\"><div class=\"txt\"><b>Open apps first</b><small>Apps with a window open come first in the Apps tab</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"appsRunningFirst\"></label>\n          </div>\n        </div>\n        <div class=\"group\">\n          <h2>Tools</h2>\n          <div class=\"card\">\n            <label class=\"row\"><b>Calculator</b><input type=\"checkbox\" class=\"sw\" data-feature=\"calculator\"></label>\n          </div>\n        </div>\n",
+    ),
     ("index.html", r##"  <script src="views/netspeed.js"></script>
 "##, r##"  <script src="views/netspeed.js"></script>
   <script src="views/adhan.js"></script>

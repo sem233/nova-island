@@ -62,6 +62,12 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.10
+
+**Island Calculator add-on** — click the new calculator icon next to News/Settings in the expanded topbar to open a compact DPI-scaled calculator (`+`, `−`, `×`, `÷`, decimals) with live preview, standard operator precedence, Arabic-Indic digit normalization (`٠-٩`, `٫`), LTR display/grid preservation in Arabic UI, hold-to-repeat backspace, full theme & blur/solid/no-animation support, and an on/off toggle under **Settings › Island › Tools › Calculator**.
+
+**Dual-source update check (`sem233/nova-island` + official)** — kept **Check for updates** pointing to the upstream `NOVA-TECH-KIT/nova-island` repository, added a dedicated **Check fork updates (`sem233/nova-island`)** button in **Settings › General**, updated the app updater version baseline to `1.8.10`, and added `latest.yml` manifest generation + upload to the release workflow so in-app fork updates download and install automatically.
+
 ## What's new in 1.8.9
 
 **Reliable SPA & HLS video extraction** — added an audio-muted WebView2 runtime stream sniffer fallback for JavaScript-rendered video pages (such as `cinejoy.pk`), separated `sourcePage` / `Referer` / `Origin` headers for both probing and downloading via `yt-dlp`, upgraded generic stream filenames (e.g. `master`) to clean page titles, restored strict TLS certificate verification, and surfaced specific error messages for TLS, DRM, login walls, anti-bot gates, and unsupported links.

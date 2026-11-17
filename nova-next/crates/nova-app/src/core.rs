@@ -14,6 +14,7 @@ use crate::{
 
 pub const WIN_W: f64 = 640.0;
 pub const WIN_H: f64 = 320.0;
+pub const CALC_WIN_H: f64 = 440.0;
 const HOVER_INTENT_MS: u128 = 280;
 /// (1.8.7) the thin line stays this long after it last looked over the browser's tabs
 const LINE_KEEP: std::time::Duration = std::time::Duration::from_millis(1500);
@@ -87,6 +88,9 @@ pub struct Core {
     dimmed: bool,
     clickable: bool,
     pinned: bool,
+    calc_open: bool,
+    calc_closing: bool,
+    pub calc_rect: Rect,
     pub island_rect: Rect,
     /// The pill at rest (not opened, no notification): what "over a tab" is decided on, so the
     /// opened island covering a tab doesn't close itself.
@@ -113,6 +117,7 @@ impl Core {
             win, send, store, features, prefs,
             anchor: None, last_layout: String::new(), omni: None, omni_key: String::new(), drag: None, drag_from: None,
             user_hidden: false, fullscreen_hidden: false, tab_rects: Vec::new(), line: false, line_rect: Rect::default(), line_off_since: None, browser_rect: None, ghost: false, ghost_open: false, dimmed: false, clickable: false, pinned: false,
+            calc_open: false, calc_closing: false, calc_rect: Rect::default(),
             island_rect: Rect::default(), rest_rect: Rect::default(), pending_rest: None, inside: false, active: false, entered_at: Instant::now(), suppress_until_leave: false,
             near_sent: None, cursor_far: false,
         }
@@ -162,19 +167,24 @@ impl Core {
         }
     }
 
+    fn win_h_for(&self, bounds_h: f64) -> f64 {
+        if self.calc_open { CALC_WIN_H.min(bounds_h.max(WIN_H)) } else { WIN_H }
+    }
+
     fn layout_address_bar(&mut self) {
         let o = self.omni.clone().unwrap();
         // the helper reports physical pixels; place windows in DIPs
         let r = screen::rect_to_dip(o["x"].as_i64().unwrap_or(0) as i32, o["y"].as_i64().unwrap_or(0) as i32, o["w"].as_i64().unwrap_or(0) as i32, o["h"].as_i64().unwrap_or(0) as i32);
         let b = screen::matching(r).bounds;
+        let wh = self.win_h_for(b.height);
         let third = r.width / 3.0;
         let sh = round(30f64.min(22f64.max(r.height + 6.0)));
         let sw = round((third - 12.0).min(380.0));
         let cx = r.x + r.width - third / 2.0; // centre of the right third
         let top = round(r.y + r.height / 2.0 - sh / 2.0);
         let wx = round(clamp(cx - WIN_W / 2.0, b.x, b.x + b.width - WIN_W));
-        let wy = round(clamp(top - FLOAT_TOP, b.y, b.y + b.height - WIN_H));
-        self.win.set_pos(wx, wy);
+        let wy = round(clamp(top - FLOAT_TOP, b.y, (b.y + b.height - wh).max(b.y)));
+        self.win.set_rect(wx, wy, WIN_W, wh);
         let msg = json!({ "x": round(cx - wx), "y": top - wy, "docked": false, "vertical": false, "side": self.side(), "addr": if o["focus"] == true { "line" } else { "slim" }, "sw": sw, "sh": sh });
         self.emit_layout(msg);
     }
@@ -197,17 +207,18 @@ impl Core {
         }
         let d = screen::nearest(round(a.x), round(a.y));
         let (b, wa) = (d.bounds, d.work_area);
+        let wh = self.win_h_for(wa.height);
         let (wx, wy);
         if self.vertical() {
             a.x = if self.side() == "left" { b.x } else { b.x + b.width };
             a.y = clamp(a.y, wa.y + V_PILL_HALF_H, wa.y + wa.height - V_PILL_HALF_H);
             wx = if self.side() == "left" { b.x } else { b.x + b.width - WIN_W };
-            wy = round(clamp(a.y - WIN_H / 2.0, wa.y, wa.y + wa.height - WIN_H));
+            wy = round(clamp(a.y - WIN_H / 2.0, wa.y, (wa.y + wa.height - wh).max(wa.y)));
         } else {
             a.x = clamp(a.x, b.x + PILL_HALF_W, b.x + b.width - PILL_HALF_W);
             a.y = if self.docked() { b.y } else { clamp(a.y, b.y, wa.y + wa.height - PILL_H - 6.0) };
             wx = round(clamp(a.x - WIN_W / 2.0, b.x, b.x + b.width - WIN_W));
-            wy = round(if self.docked() { b.y } else { clamp(a.y - FLOAT_TOP, b.y, wa.y + wa.height - WIN_H) });
+            wy = round(if self.docked() { b.y } else { clamp(a.y - FLOAT_TOP, b.y, (wa.y + wa.height - wh).max(b.y)) });
         }
         // (1.8.7) the place the user set stays as it is: only where it shows is kept inside the
         // display. Writing the kept-inside place back made it the island's own: started before a
@@ -218,11 +229,11 @@ impl Core {
         // island sits (renderer.js draws it as in the address bar; opened, it comes down from
         // there as a docked island does). The island's own place stays as it was.
         if self.line && !self.vertical() {
-            self.win.set_pos(wx, b.y);
+            self.win.set_rect(wx, b.y, WIN_W, wh);
             self.emit_layout(json!({ "x": round(a.x - wx), "y": 0, "docked": true, "vertical": false, "side": self.side(), "addr": "line" }));
             return;
         }
-        self.win.set_pos(wx, wy);
+        self.win.set_rect(wx, wy, WIN_W, wh);
         let msg = json!({ "x": round(a.x - wx), "y": round(a.y - wy), "docked": !self.vertical() && self.docked(), "vertical": self.vertical(), "side": self.side() });
         self.emit_layout(msg);
     }
@@ -651,15 +662,25 @@ impl Core {
         let r = self.island_rect;
         let fx = (r.x - x).max(0.0).max(x - r.x - r.width);
         let fy = (r.y - y).max(0.0).max(y - r.y - r.height);
-        self.cursor_far = fx.hypot(fy) > FAR_PX;
+        self.cursor_far = !self.calc_active() && fx.hypot(fy) > FAR_PX;
         self.send_near(x, y, fx.hypot(fy));
         // the thin line is 4px: a little more room to rest the cursor on it
         let pad = if self.active { 8.0 } else if self.line { 6.0 } else { 2.0 };
-        let now = r.width > 0.0 && r.height > 0.0 && x >= r.x - pad && x <= r.x + r.width + pad && y >= r.y - pad && y <= r.y + r.height + pad;
+        let in_island = r.width > 0.0 && r.height > 0.0 && x >= r.x - pad && x <= r.x + r.width + pad && y >= r.y - pad && y <= r.y + r.height + pad;
+        let c = self.calc_rect;
+        let in_calc = self.calc_active() && c.width > 0.0 && c.height > 0.0 && x >= c.x - 4.0 && x <= c.x + c.width + 4.0 && y >= c.y - 4.0 && y <= c.y + c.height + 4.0;
+        let now = in_island || in_calc;
         if now && !self.inside {
             self.entered_at = now_ts;
         }
         self.inside = now;
+        if self.calc_active() {
+            self.win.set_ignore_mouse(!now);
+            if now && !self.active && !self.suppress_until_leave {
+                self.set_active(true);
+            }
+            return;
+        }
         let instant_wake = self.clickable || self.pinned || self.ghost_open;
         if !now {
             self.suppress_until_leave = false;
@@ -667,6 +688,44 @@ impl Core {
         } else if !self.active && !self.suppress_until_leave && (instant_wake || (!self.ghost && now_ts.saturating_duration_since(self.entered_at).as_millis() >= HOVER_INTENT_MS)) {
             self.set_active(true);
         }
+    }
+
+    pub fn set_calc_open(&mut self, on: bool) -> bool {
+        if on == self.calc_open && (!on || !self.calc_closing) {
+            return false;
+        }
+        self.calc_open = on;
+        self.calc_closing = false;
+        if !on {
+            self.calc_rect = Rect::default();
+        }
+        self.layout();
+        if !on && !self.win.hwnd.0.is_null() {
+            self.poll_cursor();
+        }
+        true
+    }
+
+    pub fn set_calc_rect(&mut self, r: Option<Rect>) {
+        self.calc_rect = r.unwrap_or_default();
+    }
+
+    pub fn calc_active(&self) -> bool {
+        self.calc_open && !self.calc_closing
+    }
+
+    pub fn inside(&self) -> bool {
+        self.inside
+    }
+
+    pub fn prepare_calc_blur(&mut self) -> bool {
+        if !self.calc_active() {
+            return false;
+        }
+        self.calc_closing = true;
+        self.win.set_focusable(false);
+        self.win.set_ignore_mouse(true);
+        true
     }
 
     /// Faded over a browser's tabs (Stay in place), as the page is told by DIM.
@@ -683,6 +742,8 @@ impl Core {
     pub fn next_poll_ms(&self) -> u32 {
         if !self.win.visible() {
             600
+        } else if self.calc_active() {
+            20
         } else if self.cursor_far {
             100
         } else {
@@ -864,5 +925,67 @@ mod tests {
         core.poll_cursor_at(wx - 50.0, wy + 250.0, Instant::now() + Duration::from_millis(650));
 
         assert_eq!(core.rest_rect.width, 236.0, "expanded panel dimensions must never overwrite rest_rect");
+    }
+
+    #[test]
+    fn calculator_extends_height_keeps_hover_and_restores_on_close() {
+        let (mut core, _) = test_core();
+        core.place_window();
+        assert_eq!(core.win.size(), (WIN_W, WIN_H));
+
+        assert!(core.set_calc_open(true));
+        assert!(core.calc_active());
+        assert_eq!(core.win.size().0, WIN_W);
+        assert!(core.win.size().1 > WIN_H);
+
+        let calc_r = Rect { x: 300.0, y: 52.0, width: 260.0, height: 340.0 };
+        core.set_calc_rect(Some(calc_r));
+        core.set_pinned(true);
+
+        let (wx, wy) = core.win.pos();
+        let t0 = Instant::now();
+        // Cursor over calculator panel below expanded island keeps interaction active
+        core.poll_cursor_at(wx + 420.0, wy + 360.0, t0);
+        assert!(core.active());
+        assert!(!core.win.ignore_mouse(), "cursor inside calculator panel must be clickable");
+
+        // Moving cursor off both keeps island active while typing, while passing outside clicks
+        core.poll_cursor_at(wx - 40.0, wy + 360.0, t0 + Duration::from_millis(30));
+        assert!(core.active(), "typing with cursor outside calc must not collapse island");
+        assert!(core.win.ignore_mouse(), "outside cursor lets clicks pass to window below");
+
+        // Closing calculator restores resting 640x320 size and normal collapse
+        assert!(core.set_calc_open(false));
+        assert!(!core.calc_active());
+        assert_eq!(core.win.size(), (WIN_W, WIN_H));
+        core.set_pinned(false);
+        core.poll_cursor_at(wx - 40.0, wy + 250.0, t0 + Duration::from_millis(60));
+        assert!(!core.active(), "island must collapse normally after calculator closes");
+        assert!(core.win.ignore_mouse());
+    }
+
+    #[test]
+    fn calculator_blur_closes_cleanly_and_allows_reopen() {
+        let (mut core, _) = test_core();
+        core.place_window();
+        assert!(core.set_calc_open(true));
+        assert!(core.calc_active());
+        assert_eq!(core.win.size(), (WIN_W, CALC_WIN_H));
+
+        // First external blur prepares close without losing expanded window size mid-animation
+        assert!(core.prepare_calc_blur());
+        assert!(!core.calc_active(), "blur must deactivate active state immediately");
+        assert!(!core.prepare_calc_blur(), "second blur while closing must be ignored");
+        assert!(core.win.ignore_mouse());
+        assert_eq!(core.win.size(), (WIN_W, CALC_WIN_H));
+
+        // Re-opening mid-close animation cancels closing state cleanly
+        assert!(core.set_calc_open(true));
+        assert!(core.calc_active());
+
+        // Finishing close restores resting height
+        assert!(core.set_calc_open(false));
+        assert!(!core.calc_active());
+        assert_eq!(core.win.size(), (WIN_W, WIN_H));
     }
 }

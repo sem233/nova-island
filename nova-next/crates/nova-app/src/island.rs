@@ -39,10 +39,11 @@ pub fn create(wndproc: WNDPROC) -> windows::core::Result<HWND> {
     }
 }
 
-/// The window as nova.js sees it: a position in DIPs, a fixed 640x320 DIP size.
+/// The window as nova.js sees it: a position in DIPs, a 640x320 DIP resting size.
 pub struct Window {
     pub hwnd: HWND,
     pos: Cell<(f64, f64)>,
+    size: Cell<(f64, f64)>,
     ignore_mouse: Cell<bool>,
     #[cfg(test)]
     test_visible: Cell<bool>,
@@ -53,6 +54,7 @@ impl Window {
         Window {
             hwnd,
             pos: Cell::new((f64::NAN, f64::NAN)),
+            size: Cell::new((WIN_W, WIN_H)),
             ignore_mouse: Cell::new(true),
             #[cfg(test)]
             test_visible: Cell::new(true),
@@ -63,18 +65,28 @@ impl Window {
         self.pos.get()
     }
 
+    pub fn size(&self) -> (f64, f64) {
+        self.size.get()
+    }
+
     /// Moves the window (DIPs); its pixel size follows the scale of the display it lands on.
     pub fn set_pos(&self, x: f64, y: f64) {
-        if self.pos.get() == (x, y) {
+        self.set_rect(x, y, WIN_W, WIN_H);
+    }
+
+    /// Moves and sizes the window in DIPs using the display's DPI scale.
+    pub fn set_rect(&self, x: f64, y: f64, w_dip: f64, h_dip: f64) {
+        if self.pos.get() == (x, y) && self.size.get() == (w_dip, h_dip) {
             return;
         }
         self.pos.set((x, y));
+        self.size.set((w_dip, h_dip));
         if self.hwnd.0.is_null() {
             return;
         }
-        let d = screen::nearest(x + WIN_W / 2.0, y + WIN_H / 2.0);
+        let d = screen::nearest(x + w_dip / 2.0, y + h_dip / 2.0);
         let (px, py) = d.to_phys(x, y);
-        let (w, h) = ((WIN_W * d.scale).round() as i32, (WIN_H * d.scale).round() as i32);
+        let (w, h) = ((w_dip * d.scale).round() as i32, (h_dip * d.scale).round() as i32);
         unsafe {
             let _ = SetWindowPos(self.hwnd, Some(HWND_TOPMOST), px, py, w, h, SWP_NOACTIVATE);
         }

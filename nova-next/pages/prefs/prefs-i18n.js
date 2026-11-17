@@ -27,6 +27,8 @@
     'Update now': 'حدّث الآن',
     'Check for updates': 'البحث عن تحديثات',
     'Check now': 'ابحث الآن',
+    'Check fork updates': 'تحديثات المستودع (sem233)',
+    'Check fork': 'فحص المستودع',
     'Checking…': 'جارٍ البحث…',
     'Version': 'الإصدار',
     'You have the latest version': 'لديك أحدث إصدار',
@@ -166,6 +168,8 @@
     'New track card': 'بطاقة المقطع الجديد',
     'Open apps first': 'التطبيقات المفتوحة أولًا',
     'Apps with a window open come first in the Apps tab': 'تظهر التطبيقات التي لها نافذة مفتوحة أولًا في تبويب التطبيقات',
+    'Tools': 'الأدوات',
+    'Calculator': 'الآلة الحاسبة',
     // Themes
     'Give the island a new look. Every theme is free, and none of them makes Nova heavier; solid themes are even lighter.': 'امنح الجزيرة مظهرًا جديدًا. جميع المظاهر مجانية، ولا يزيد أيٌّ منها من استهلاك Nova، والمظاهر ذات اللون الثابت أخف.',
     'Theme': 'المظهر',

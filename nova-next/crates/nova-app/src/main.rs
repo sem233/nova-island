@@ -49,7 +49,7 @@ use windows::{
         Foundation::*,
         UI::{
             HiDpi::*,
-            Input::KeyboardAndMouse::{RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT},
+            Input::KeyboardAndMouse::{GetAsyncKeyState, RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_LBUTTON, VK_RBUTTON},
             WindowsAndMessaging::*,
         },
     },
@@ -59,6 +59,7 @@ const WM_SYS: u32 = WM_APP + 1; // a nova-sys line is waiting
 const WM_LATER_SIZE: u32 = WM_APP + 7; // a WM_SIZE that came while the app was busy
 const WM_LATER_LAYOUT: u32 = WM_APP + 8; // the same for a display or scale change
 const WM_SHOW_ISLAND: u32 = WM_APP + 9; // Nova was started again: show the island if it's hidden
+const WM_CALC_BLUR: u32 = WM_APP + 10; // calculator lost window activation
 const TIMER_CURSOR: usize = 1;
 const TIMER_DRAG: usize = 2;
 const TIMER_CAPTURE: usize = 3;
@@ -71,6 +72,29 @@ const SHOWN_OK: usize = 0x4e4f5641; // "NOVA"
 thread_local! {
     /// The island page is there and answering (false after its process failed, until it loads).
     static PAGE_ALIVE: Cell<bool> = const { Cell::new(true) };
+    static CALC_PREV_FG: Cell<isize> = const { Cell::new(0) };
+    static CALC_BTN_DOWN: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn remember_calc_prev_fg(island_hwnd: HWND) {
+    unsafe {
+        let fg = GetForegroundWindow();
+        if !fg.0.is_null() && fg != island_hwnd {
+            CALC_PREV_FG.with(|c| c.set(fg.0 as isize));
+        }
+    }
+}
+
+pub fn restore_calc_prev_fg(island_hwnd: HWND) {
+    unsafe {
+        let prev_raw = CALC_PREV_FG.with(|c| c.replace(0));
+        if prev_raw != 0 && GetForegroundWindow() == island_hwnd {
+            let prev = HWND(prev_raw as *mut _);
+            if IsWindow(Some(prev)).as_bool() && !IsIconic(prev).as_bool() {
+                let _ = SetForegroundWindow(prev);
+            }
+        }
+    }
 }
 
 /// The island page answers again ("island-ready") or stopped (its process failed).
@@ -292,10 +316,11 @@ pub fn capture_now(a: &Rc<RefCell<App>>) {
     }
     let (Some(env), Some(page)) = (s.env.clone(), s.page.clone()) else { return };
     let (x, y) = s.core.win.pos();
-    let display = screen::matching(screen::Rect { x, y, width: core::WIN_W, height: core::WIN_H });
+    let (ww, wh) = s.core.win.size();
+    let display = screen::matching(screen::Rect { x, y, width: ww, height: wh });
     let slow = s.glass.perf(&s.core.features).slow();
     let hwnd = s.core.win.hwnd;
-    s.glass.capture(hwnd, &display, core::WIN_W, core::WIN_H, slow, &env, &page.webview);
+    s.glass.capture(hwnd, &display, ww, wh, slow, &env, &page.webview);
 }
 
 /// What follows a change of features, the battery or a recorder (nova.js onChange / evalSaver /
@@ -368,6 +393,17 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                         let mut s = a.borrow_mut();
                         let was = s.core.active();
                         s.core.poll_cursor();
+                        if s.core.calc_active() {
+                            let down = (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0
+                                || (GetAsyncKeyState(VK_RBUTTON.0 as i32) as u16 & 0x8000) != 0;
+                            let prev = CALC_BTN_DOWN.with(|c| c.replace(down));
+                            if down && !prev && !s.core.inside() && s.core.prepare_calc_blur() {
+                                CALC_PREV_FG.with(|c| c.set(0));
+                                (s.core.send)("calc-close", Value::Null);
+                            }
+                        } else {
+                            CALC_BTN_DOWN.with(|c| c.set(false));
+                        }
                         let now = s.core.active();
                         let next = s.core.next_poll_ms();
                         drop(s);
@@ -453,6 +489,29 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                 if m != WM_DISPLAYCHANGE {
                     return LRESULT(0);
                 }
+            }
+            WM_ACTIVATE if (w.0 & 0xffff) as u32 == WA_INACTIVE => {
+                if let Some(a) = app() {
+                    if let Ok(s) = a.try_borrow() {
+                        if s.core.calc_active() {
+                            let _ = PostMessageW(Some(h), WM_CALC_BLUR, WPARAM(0), LPARAM(0));
+                        }
+                    } else {
+                        let _ = PostMessageW(Some(h), WM_CALC_BLUR, WPARAM(0), LPARAM(0));
+                    }
+                }
+            }
+            WM_CALC_BLUR => {
+                if let Some(a) = app() {
+                    if GetForegroundWindow() != h {
+                        let mut s = a.borrow_mut();
+                        if s.core.prepare_calc_blur() {
+                            CALC_PREV_FG.with(|c| c.set(0));
+                            (s.core.send)("calc-close", Value::Null);
+                        }
+                    }
+                }
+                return LRESULT(0);
             }
             WM_DESTROY => {
                 tray::remove(h);

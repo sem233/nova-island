@@ -51,6 +51,7 @@ pub fn defaults() -> Map<String, Value> {
         ("batterySaver", json!(false)),
         ("batterySaverAt", json!(20)), // percent
         ("news", json!(true)),         // plugins, updates and news from the Nova team (news.json on GitHub)
+        ("calculator", json!(true)),   // compact calculator panel in the expanded island topbar
         ("theme", json!("madar")),     // the island's look (themes.css; 1.8.7: Madar for new users)
         ("prefsLang", json!("en")),    // the Settings window in English or Arabic (1.8: "en" | "ar")
         ("clock24", json!(false)),     // times in 24 hours on the island and the widgets (1.8; off: 12 hours)

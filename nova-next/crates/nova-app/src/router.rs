@@ -181,7 +181,7 @@ fn prefs_channel(app: &Rc<RefCell<App>>, channel: &str, args: &[Value], id: Opti
         "update-state" => json!({ "ready": app.borrow().updater.ready_version() }),
         // Settings › General › Check for updates (1.8.6): the answer comes as "update-check"
         "update-check" => {
-            app.borrow().updater.check_now();
+            app.borrow().updater.check_now_from(arg0.as_str() == Some("fork"));
             Value::Null
         }
         "update-now" => {
@@ -333,6 +333,34 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
         }
         "pinned" => {
             app.borrow_mut().core.set_pinned(arg0.as_bool().unwrap_or(false));
+            Value::Null
+        }
+        "calc-open" => {
+            let on = arg0.as_bool().unwrap_or(false);
+            let from_blur = args.get(1).and_then(Value::as_bool).unwrap_or(false);
+            let changed = {
+                let mut s = app.borrow_mut();
+                if on {
+                    crate::remember_calc_prev_fg(hwnd);
+                }
+                s.core.set_calc_open(on)
+            };
+            if !on && !from_blur {
+                crate::restore_calc_prev_fg(hwnd);
+            }
+            if changed {
+                crate::schedule_capture(hwnd, 20);
+            }
+            Value::Null
+        }
+        "calc-rect" => {
+            let r = arg0.is_object().then(|| Rect {
+                x: arg0["x"].as_f64().unwrap_or(0.0),
+                y: arg0["y"].as_f64().unwrap_or(0.0),
+                width: arg0["width"].as_f64().unwrap_or(0.0),
+                height: arg0["height"].as_f64().unwrap_or(0.0),
+            });
+            app.borrow_mut().core.set_calc_rect(r);
             Value::Null
         }
         "context-menu" => {

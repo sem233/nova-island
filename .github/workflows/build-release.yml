@@ -72,6 +72,29 @@ jobs:
         shell: powershell
         run: powershell -ExecutionPolicy Bypass -File nova-next\installer\build.ps1
 
+      - name: Generate latest.yml
+        shell: powershell
+        run: |
+          $setup = Get-ChildItem nova-next\target\dist\Nova-Island-Setup-*.exe | Select-Object -First 1
+          if (-not $setup) { throw "Setup exe not found" }
+          $ver = ($setup.BaseName -replace '^Nova-Island-Setup-', '')
+          $bytes = [System.IO.File]::ReadAllBytes($setup.FullName)
+          $sha = [System.Security.Cryptography.SHA512]::Create()
+          $hash = [Convert]::ToBase64String($sha.ComputeHash($bytes))
+          $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+          $yml = (@(
+            "version: $ver",
+            "files:",
+            "  - url: $($setup.Name)",
+            "    sha512: $hash",
+            "    size: $($setup.Length)",
+            "path: $($setup.Name)",
+            "sha512: $hash",
+            "releaseDate: '$date'"
+          ) -join "`n") + "`n"
+          $out = Join-Path $setup.DirectoryName "latest.yml"
+          [System.IO.File]::WriteAllText($out, $yml, (New-Object System.Text.UTF8Encoding $false))
+
       - name: List dist output
         shell: powershell
         run: Get-ChildItem nova-next\target\dist | Select-Object Name,Length
@@ -83,6 +106,7 @@ jobs:
           path: |
             nova-next/target/dist/Nova-Island-Setup-*.exe
             nova-next/target/dist/Nova-Island-*-Portable.exe
+            nova-next/target/dist/latest.yml
           if-no-files-found: error
 
       - name: Upload to GitHub Release
@@ -93,4 +117,5 @@ jobs:
           files: |
             nova-next/target/dist/Nova-Island-Setup-*.exe
             nova-next/target/dist/Nova-Island-*-Portable.exe
+            nova-next/target/dist/latest.yml
           fail_on_unmatched_files: true
