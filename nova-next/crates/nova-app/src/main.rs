@@ -143,7 +143,7 @@ fn arg(name: &str) -> Option<String> {
 
 /// "Stay in place" over a browser: the whole island at half opacity (new in 1.8), so the tabs
 /// under it show through. Added from here, so the page files stay as they are.
-const DIM_JS: &str = "(on => { let s = document.getElementById('nova-dim'); if (!s) { s = document.createElement('style'); s.id = 'nova-dim'; s.textContent = 'html { transition: opacity .25s ease } html.nova-dim { opacity: .5 } html:has(body.no-anim) { transition: none }'; document.head.appendChild(s); } document.documentElement.classList.toggle('nova-dim', on); })";
+const DIM_JS: &str = "(on => { let s = document.getElementById('nova-dim'); if (!s) { s = document.createElement('style'); s.id = 'nova-dim'; s.textContent = 'html { transition: opacity .22s ease } html.nova-dim { opacity: .62 } html:has(body.no-anim) { transition: none }'; document.head.appendChild(s); } document.documentElement.classList.toggle('nova-dim', on); })";
 
 /// Shows another app's notification in the island's toast, the way news items show.
 /// Another app's notification in the island's toast: its icon where the bell goes, a soft glow in

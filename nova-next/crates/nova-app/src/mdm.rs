@@ -47,6 +47,7 @@ struct MdmItem {
     id: String,
     url: String,
     referer: String,
+    custom_output_title: bool,
     base_title: String,
     name: String,
     path: String,
@@ -474,6 +475,166 @@ fn ensure_https(u: &str) -> String {
     }
 }
 
+/// Returns `scheme://host[:port]` (without trailing slash) for HTTP `Origin` headers.
+pub fn origin_header(url: &str) -> Option<String> {
+    let (scheme_raw, rest) = url.trim().split_once("://")?;
+    let scheme = scheme_raw.to_ascii_lowercase();
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    let host = rest.split(['/', '?', '#']).next()?;
+    if host.is_empty() || host.contains('@') || host.contains('\\') {
+        return None;
+    }
+    Some(format!("{scheme}://{}", host.to_ascii_lowercase()))
+}
+
+fn is_generic_stream_title(s: &str) -> bool {
+    let t = s.trim().to_ascii_lowercase();
+    if t.is_empty()
+        || matches!(
+            t.as_str(),
+            "master" | "index" | "playlist" | "manifest" | "stream" | "video" | "na" | "chunklist"
+        )
+    {
+        return true;
+    }
+    t.len() >= 24 && t.chars().all(|c| c.is_ascii_hexdigit() || c == '-' || c == '_')
+}
+
+/// Replaces generic stream manifest titles (`master`, UUIDs) with the captured page or media title.
+pub fn clean_title_hint(meta_title: &str, page_title: Option<&str>, req_title: Option<&str>) -> String {
+    if !is_generic_stream_title(meta_title) {
+        return meta_title.trim().to_string();
+    }
+    for cand in [page_title, req_title].into_iter().flatten() {
+        if !is_generic_stream_title(cand) {
+            return cand.trim().to_string();
+        }
+    }
+    let trimmed = meta_title.trim();
+    if trimmed.is_empty() { "Video".to_string() } else { trimmed.to_string() }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProbeErrorKind {
+    TlsError,
+    DrmProtected,
+    AuthRequired,
+    BotChallenge,
+    UnsupportedUrl,
+    Timeout,
+    Network,
+    Generic,
+}
+
+pub fn classify_probe_error(stderr: &str) -> ProbeErrorKind {
+    let l = stderr.to_ascii_lowercase();
+    if l.contains("certificate_verify_failed")
+        || l.contains("ssl: certificate")
+        || l.contains("unable to get local issuer certificate")
+        || l.contains("certificate verify")
+    {
+        return ProbeErrorKind::TlsError;
+    }
+    if l.contains("drm") || l.contains("widevine") || l.contains("playready") || l.contains("fairplay") {
+        return ProbeErrorKind::DrmProtected;
+    }
+    if l.contains("sign in")
+        || l.contains("login")
+        || l.contains("authentication")
+        || l.contains("cookies-from-browser")
+        || l.contains("private video")
+        || l.contains("members-only")
+        || l.contains("http error 401")
+    {
+        return ProbeErrorKind::AuthRequired;
+    }
+    if l.contains("cloudflare")
+        || l.contains("captcha")
+        || l.contains("turnstile")
+        || l.contains("verify you are human")
+        || l.contains("confirm you're not a bot")
+        || l.contains("http error 403")
+        || l.contains("http error 429")
+    {
+        return ProbeErrorKind::BotChallenge;
+    }
+    if l.contains("unsupported url") {
+        return ProbeErrorKind::UnsupportedUrl;
+    }
+    if l.contains("timed out") || l.contains("timeout") {
+        return ProbeErrorKind::Timeout;
+    }
+    if l.contains("getaddrinfo")
+        || l.contains("failed to resolve")
+        || l.contains("name or service not known")
+        || l.contains("connection refused")
+        || l.contains("http error 404")
+        || l.contains("http error 5")
+    {
+        return ProbeErrorKind::Network;
+    }
+    ProbeErrorKind::Generic
+}
+
+pub fn probe_error_response(kind: ProbeErrorKind) -> Value {
+    let (code, msg) = match kind {
+        ProbeErrorKind::TlsError => (
+            "tls-error",
+            "تعذر التحقق من شهادة الأمان (TLS) للموقع — تم إيقاف الاتصال حفاظًا على الأمان",
+        ),
+        ProbeErrorKind::DrmProtected => (
+            "drm-protected",
+            "هذا الفيديو محمي بتقنية DRM ولا يمكن تنزيله",
+        ),
+        ProbeErrorKind::AuthRequired => (
+            "auth-required",
+            "هذا المحتوى يتطلب تسجيل الدخول أو صلاحية وصول من المتصفح",
+        ),
+        ProbeErrorKind::BotChallenge => (
+            "bot-challenge",
+            "الموقع محمي ببوابة تحقق ضد الروبوتات (Cloudflare / CAPTCHA) ولا يمكن الاستخراج تلقائيًا",
+        ),
+        ProbeErrorKind::UnsupportedUrl => (
+            "no-video",
+            "لم يتم العثور على رابط فيديو قابل للتنزيل في هذه الصفحة",
+        ),
+        ProbeErrorKind::Timeout => (
+            "timeout",
+            "انتهت مهلة الاتصال أثناء فحص الفيديو — حاول مرة أخرى",
+        ),
+        ProbeErrorKind::Network => (
+            "network-error",
+            "تعذر الوصول إلى خادم الفيديو أو الرابط غير متاح حاليًا",
+        ),
+        ProbeErrorKind::Generic => (
+            "no-video",
+            "تعذر استخراج جودات الفيديو من هذا الرابط",
+        ),
+    };
+    json!({ "ok": false, "error": code, "message": msg })
+}
+
+fn block_to_error_kind(b: nova_web::SniffBlock) -> ProbeErrorKind {
+    match b {
+        nova_web::SniffBlock::TlsError => ProbeErrorKind::TlsError,
+        nova_web::SniffBlock::AuthRequired => ProbeErrorKind::AuthRequired,
+        nova_web::SniffBlock::BotChallenge => ProbeErrorKind::BotChallenge,
+        nova_web::SniffBlock::DrmProtected => ProbeErrorKind::DrmProtected,
+    }
+}
+
+fn is_hard_stop_error(kind: ProbeErrorKind) -> bool {
+    matches!(
+        kind,
+        ProbeErrorKind::TlsError
+            | ProbeErrorKind::DrmProtected
+            | ProbeErrorKind::AuthRequired
+            | ProbeErrorKind::BotChallenge
+    )
+}
+
 /// Resolves URL from request, browser window, foreground window, or clipboard.
 /// When `passive` is true (background auto-probe), NEVER switches tabs or falls back to clipboard.
 pub fn resolve_url(req: &Value, passive: bool) -> Option<String> {
@@ -537,14 +698,15 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
         }
     }
 
-    // 2. Join an in-flight probe for the same URL instead of launching a second yt-dlp
+    // 2. Join an in-flight probe for the same URL (keyed by passive/active so clicks run sniffer if needed)
+    let flight_key = format!("{url}\0{}", if passive { 'p' } else { 'a' });
     let (slot, is_owner) = {
         let mut map = IN_FLIGHT_PROBES.lock().unwrap();
-        if let Some(existing) = map.get(&url) {
+        if let Some(existing) = map.get(&flight_key) {
             (existing.clone(), false)
         } else {
             let fresh = Arc::new((Mutex::new(None), Condvar::new()));
-            map.insert(url.clone(), fresh.clone());
+            map.insert(flight_key.clone(), fresh.clone());
             (fresh, true)
         }
     };
@@ -563,7 +725,7 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
     // Publish to waiting callers & remove from in-flight map
     {
         let mut map = IN_FLIGHT_PROBES.lock().unwrap();
-        map.remove(&url);
+        map.remove(&flight_key);
     }
     {
         let (lock, cv) = &*slot;
@@ -574,7 +736,13 @@ pub fn probe_video(req: &Value, data_dir: &Path) -> Value {
     result
 }
 
-fn run_probe_cmd(ytdlp: &Path, url: &str, ff: Option<&Path>, js: Option<&str>) -> Option<Vec<u8>> {
+struct ProbeCmdOut {
+    stdout: Vec<u8>,
+    stderr: String,
+    success: bool,
+}
+
+fn run_probe_cmd(ytdlp: &Path, url: &str, referer: &str, ff: Option<&Path>, js: Option<&str>) -> Option<ProbeCmdOut> {
     let mut cmd = Command::new(ytdlp);
     cmd.args([
         "--ignore-config",
@@ -586,15 +754,17 @@ fn run_probe_cmd(ytdlp: &Path, url: &str, ff: Option<&Path>, js: Option<&str>) -
         "--encoding",
         "utf-8",
         "--socket-timeout",
-        "8",
-        "--no-check-certificates",
+        "10",
         "--extractor-retries",
         "1",
         "--user-agent",
         UA,
         "--referer",
-        url,
+        referer,
     ]);
+    if let Some(orig) = origin_header(referer) {
+        cmd.args(["--add-header", &format!("Origin:{orig}")]);
+    }
     if url.contains("youtube.com") || url.contains("youtu.be") {
         cmd.args(["--extractor-args", "youtube:player_client=default,-tv"]);
     }
@@ -611,42 +781,111 @@ fn run_probe_cmd(ytdlp: &Path, url: &str, ff: Option<&Path>, js: Option<&str>) -
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
     }
-    cmd.output().ok().filter(|o| o.status.success() && !o.stdout.is_empty()).map(|o| o.stdout)
+    cmd.output().ok().map(|o| ProbeCmdOut {
+        success: o.status.success() && !o.stdout.is_empty(),
+        stderr: String::from_utf8_lossy(&o.stderr).into_owned(),
+        stdout: o.stdout,
+    })
 }
 
 fn run_probe_uncached(url: &str, req: &Value, data_dir: &Path) -> Value {
     let ytdlp = match ensure_ytdlp(data_dir) {
         Some(p) => p,
-        None => return json!({ "ok": false, "error": "no-ytdlp" }),
+        None => return json!({ "ok": false, "error": "no-ytdlp", "message": "أداة استخراج الفيديو (yt-dlp) غير متوفرة حالياً" }),
     };
 
+    let passive = req["passive"].as_bool().unwrap_or(false);
     let ff = find_ffmpeg(data_dir);
-    // Try without overriding --js-runtimes first (~3.9s vs ~7s); retry with explicit JS runtime only if needed
-    let raw_out = run_probe_cmd(&ytdlp, url, ff.as_deref(), None).or_else(|| {
-        find_js_runtime().and_then(|js| run_probe_cmd(&ytdlp, url, ff.as_deref(), Some(&js)))
-    });
+    let first = run_probe_cmd(&ytdlp, url, url, ff.as_deref(), None);
+    let mut last_err_kind = first
+        .as_ref()
+        .filter(|o| !o.success)
+        .map(|o| classify_probe_error(&o.stderr))
+        .unwrap_or(ProbeErrorKind::Generic);
+
+    // Retry with explicit JS runtime only when extraction actually ran and failed due to challenge/script,
+    // never on Unsupported URL or security/auth blocks.
+    let mut raw_out = first.filter(|o| o.success).map(|o| o.stdout);
+    if raw_out.is_none()
+        && last_err_kind != ProbeErrorKind::UnsupportedUrl
+        && !is_hard_stop_error(last_err_kind)
+    {
+        if let Some(js) = find_js_runtime() {
+            if let Some(retry) = run_probe_cmd(&ytdlp, url, url, ff.as_deref(), Some(&js)) {
+                if retry.success {
+                    raw_out = Some(retry.stdout);
+                } else {
+                    last_err_kind = classify_probe_error(&retry.stderr);
+                }
+            }
+        }
+    }
+
+    if is_hard_stop_error(last_err_kind) {
+        return probe_error_response(last_err_kind);
+    }
+
+    let mut effective_url = url.to_string();
+    let mut sniff_title: Option<String> = None;
+
+    // WebView2 runtime sniffer fallback for interactive clicks on SPA/JS-rendered players (e.g. cinejoy.pk)
+    if raw_out.is_none()
+        && !passive
+        && (url.starts_with("https://") || url.starts_with("http://"))
+        && !nova_web::sniff::is_stream_candidate_url(url)
+    {
+        let sniff_dir = data_dir.join("wv2-sniff");
+        let _ = fs::create_dir_all(&sniff_dir);
+        let sniff = nova_web::sniff_stream(url, &sniff_dir.to_string_lossy(), Duration::from_secs(12));
+        if let Some(b) = sniff.blocked {
+            return probe_error_response(block_to_error_kind(b));
+        }
+        sniff_title = sniff.page_title.clone();
+        if let Some(stream) = sniff.stream_url {
+            effective_url = stream;
+            if let Some(res) = run_probe_cmd(&ytdlp, &effective_url, url, ff.as_deref(), None) {
+                if res.success {
+                    raw_out = Some(res.stdout);
+                } else {
+                    last_err_kind = classify_probe_error(&res.stderr);
+                    if is_hard_stop_error(last_err_kind) {
+                        return probe_error_response(last_err_kind);
+                    }
+                }
+            }
+        } else if sniff.nav_failed {
+            return probe_error_response(ProbeErrorKind::Network);
+        } else {
+            return probe_error_response(ProbeErrorKind::UnsupportedUrl);
+        }
+    }
 
     let output = match raw_out {
         Some(out) => out,
         None => {
-            if url.contains(".m3u8") || url.contains(".ts") {
+            if effective_url.contains(".m3u8") || effective_url.contains(".mpd") || effective_url.contains(".ts") {
+                let title = clean_title_hint("", sniff_title.as_deref(), req["title"].as_str());
                 let fallback = json!({
                     "ok": true,
-                    "url": url,
-                    "title": req["title"].as_str().unwrap_or("Stream Video"),
+                    "url": effective_url,
+                    "sourcePage": url,
+                    "title": title,
                     "thumbnail": "",
                     "infoFile": "",
                     "choices": [
-                        { "id": "v-hls", "label": "HLS", "tag": "HD", "height": 0, "size": 0, "kind": "video", "format_id": "best", "ext": "mp4" },
-                        { "id": "mp3", "label": "MP3", "tag": "320k", "height": 0, "size": 0, "kind": "audio", "format_id": "bestaudio/best", "ext": "mp3" }
+                        { "id": "v-hls", "label": "Best HD", "tag": "HLS", "height": 0, "size": 0, "kind": "video", "format_id": "bv*+ba/b", "ext": "mp4" },
+                        { "id": "mp3", "label": "MP3", "tag": "320k", "height": 0, "size": 0, "kind": "audio", "format_id": "ba/b", "ext": "mp3" }
                     ]
                 });
                 if let Ok(mut cache) = PROBE_CACHE.lock() {
                     cache.insert(url.to_string(), ProbeCacheEntry { at: Instant::now(), data: fallback.clone() });
+                    if effective_url != url {
+                        cache.insert(effective_url, ProbeCacheEntry { at: Instant::now(), data: fallback.clone() });
+                    }
                 }
                 return fallback;
             }
-            return json!({ "ok": false, "error": "probe-failed" });
+            return probe_error_response(last_err_kind);
         }
     };
 
@@ -661,10 +900,14 @@ fn run_probe_uncached(url: &str, req: &Value, data_dir: &Path) -> Value {
 
     let meta: Value = match serde_json::from_slice(&output) {
         Ok(v) => v,
-        Err(_) => return json!({ "ok": false, "error": "parse-failed" }),
+        Err(_) => return probe_error_response(ProbeErrorKind::Generic),
     };
 
-    let title = meta["title"].as_str().unwrap_or_else(|| req["title"].as_str().unwrap_or("Video")).to_string();
+    let title = clean_title_hint(
+        meta["title"].as_str().unwrap_or(""),
+        sniff_title.as_deref(),
+        req["title"].as_str(),
+    );
     let thumb = meta["thumbnail"].as_str().filter(|s| s.starts_with("http://") || s.starts_with("https://")).unwrap_or("").to_string();
     let duration = meta["duration"].as_f64().unwrap_or(0.0);
 
@@ -712,11 +955,15 @@ fn run_probe_uncached(url: &str, req: &Value, data_dir: &Path) -> Value {
         score: f64,
     }
     let mut by_height: HashMap<u64, StreamInfo> = HashMap::new();
+    let mut saw_drm = false;
+    let mut saw_non_drm_format = false;
     if let Some(formats) = meta["formats"].as_array() {
         for f in formats {
             if f["has_drm"].as_bool() == Some(true) {
+                saw_drm = true;
                 continue;
             }
+            saw_non_drm_format = true;
             let vc = f["vcodec"].as_str().unwrap_or("none");
             if vc == "none" || vc.is_empty() {
                 continue;
@@ -742,6 +989,10 @@ fn run_probe_uncached(url: &str, req: &Value, data_dir: &Path) -> Value {
                 }
             }
         }
+    }
+
+    if by_height.is_empty() && saw_drm && !saw_non_drm_format {
+        return probe_error_response(ProbeErrorKind::DrmProtected);
     }
 
     let mut choices = Vec::new();
@@ -802,7 +1053,8 @@ fn run_probe_uncached(url: &str, req: &Value, data_dir: &Path) -> Value {
 
     let result = json!({
         "ok": true,
-        "url": url,
+        "url": effective_url,
+        "sourcePage": url,
         "title": title,
         "thumbnail": thumb,
         "infoFile": info_file_str,
@@ -811,6 +1063,9 @@ fn run_probe_uncached(url: &str, req: &Value, data_dir: &Path) -> Value {
 
     if let Ok(mut cache) = PROBE_CACHE.lock() {
         cache.insert(url.to_string(), ProbeCacheEntry { at: Instant::now(), data: result.clone() });
+        if effective_url != url {
+            cache.insert(effective_url, ProbeCacheEntry { at: Instant::now(), data: result.clone() });
+        }
     }
 
     result
@@ -819,12 +1074,12 @@ fn run_probe_uncached(url: &str, req: &Value, data_dir: &Path) -> Value {
 /// Starts downloading the selected choice and creates a tracked `v:N` download item.
 pub fn download_video(req: &Value, data_dir: &Path) -> Value {
     let Some(url) = resolve_url(req, false) else {
-        return json!({ "ok": false, "error": "no-url" });
+        return json!({ "ok": false, "error": "no-url", "message": "افتح الفيديو في المتصفح أو انسخ رابطه" });
     };
 
     let ytdlp = match ensure_ytdlp(data_dir) {
         Some(p) => p,
-        None => return json!({ "ok": false, "error": "no-ytdlp" }),
+        None => return json!({ "ok": false, "error": "no-ytdlp", "message": "أداة التحميل غير متوفرة حالياً" }),
     };
 
     let choice = &req["choice"];
@@ -836,15 +1091,26 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
     let est_total = choice["size"].as_u64().unwrap_or(0);
     let ext = if kind == "audio" { "mp3" } else { "mp4" };
 
-    // Look up cached metadata (thumbnail + infoFile + exact title) for instant card population
-    let cached = PROBE_CACHE.lock().ok().and_then(|c| c.get(&url).map(|e| e.data.clone()));
-    let base_title = req["titleHint"]
+    // Look up cached metadata (thumbnail + infoFile + sourcePage + exact title) for instant card population
+    let cached = PROBE_CACHE.lock().ok().and_then(|c| {
+        req["sourcePage"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .and_then(|sp| c.get(sp).map(|e| e.data.clone()))
+            .or_else(|| c.get(&url).map(|e| e.data.clone()))
+    });
+    let referer = req["sourcePage"]
         .as_str()
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| cached.as_ref().and_then(|c| c["title"].as_str()).filter(|s| !s.trim().is_empty()))
-        .or_else(|| req["title"].as_str().filter(|s| !s.trim().is_empty()))
-        .unwrap_or("Video")
+        .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
+        .or_else(|| cached.as_ref().and_then(|c| c["sourcePage"].as_str()).filter(|s| s.starts_with("http://") || s.starts_with("https://")))
+        .unwrap_or(&url)
         .to_string();
+    let base_title = clean_title_hint(
+        req["titleHint"].as_str().unwrap_or(""),
+        cached.as_ref().and_then(|c| c["title"].as_str()),
+        req["title"].as_str(),
+    );
+    let custom_output_title = referer != url && !is_generic_stream_title(&base_title);
     let thumbnail = req["thumbnail"]
         .as_str()
         .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
@@ -865,7 +1131,8 @@ pub fn download_video(req: &Value, data_dir: &Path) -> Value {
         st.items.insert(0, MdmItem {
             id: id.clone(),
             url: url.clone(),
-            referer: url.clone(),
+            referer,
+            custom_output_title,
             base_title: base_title.clone(),
             name: clean_name(&format!("{base_title} [{raw_label}]"), ext),
             path: String::new(),
@@ -918,7 +1185,7 @@ fn handle_progress_line(id: &str, run_seq: u64, raw: &str, last_err: &Mutex<Stri
         let mut st = DOWNLOADS.lock().unwrap();
         if let Some(item) = st.items.iter_mut().find(|d| d.id == id && d.run_seq == run_seq) {
             let e = if item.kind == "audio" { "mp3" } else if !ext_s.is_empty() && ext_s != "NA" { ext_s } else { "mp4" };
-            if !title.is_empty() && title != "NA" {
+            if !title.is_empty() && title != "NA" && !(item.custom_output_title && is_generic_stream_title(title)) {
                 item.base_title = title.to_string();
                 let tag = if item.tag.is_empty() { "HD" } else { item.tag.as_str() };
                 item.name = clean_name(&format!("{title} [{tag}]"), e);
@@ -1073,6 +1340,8 @@ fn spawn_download(id: String, use_preloaded: bool) {
         let has_info = use_preloaded && !snap.info_file.is_empty() && Path::new(&snap.info_file).is_file();
         let file_tag = if snap.tag.is_empty() { "HD" } else { snap.tag.as_str() };
 
+        let out_template = download_output_template(snap.custom_output_title, &snap.base_title, file_tag);
+
         let mut args = vec![
             "--ignore-config".into(),
             "--no-exec".into(),
@@ -1095,6 +1364,10 @@ fn spawn_download(id: String, use_preloaded: bool) {
             "-f".into(),
             format_sel,
         ];
+        if let Some(orig) = origin_header(&snap.referer) {
+            args.push("--add-header".into());
+            args.push(format!("Origin:{orig}"));
+        }
         if let Some(js) = find_js_runtime() {
             args.push("--js-runtimes".into());
             args.push(js);
@@ -1116,7 +1389,7 @@ fn spawn_download(id: String, use_preloaded: bool) {
             "-P".into(),
             format!("temp:{}", tmp_dir.to_string_lossy()),
             "-o".into(),
-            format!("%(title).150B [{file_tag}].%(ext)s"),
+            out_template,
             "--print".into(),
             "before_dl:NOVA_META\t%(title)s\t%(thumbnail)s\t%(resolution)s\t%(height)s\t%(fps)s\t%(filesize,filesize_approx)s\t%(ext)s".into(),
             "--print".into(),
@@ -1258,8 +1531,15 @@ fn spawn_download(id: String, use_preloaded: bool) {
                 item.stage.clear();
                 item.speed = 0.0;
                 item.eta = None;
-                let msg = last_err.lock().unwrap().clone();
-                item.error = if msg.is_empty() { "Could not download this video".into() } else { msg };
+                let raw = last_err.lock().unwrap().clone();
+                let kind = classify_probe_error(&raw);
+                item.error = if kind != ProbeErrorKind::Generic {
+                    probe_error_response(kind)["message"].as_str().unwrap_or(&raw).to_string()
+                } else if raw.is_empty() {
+                    "تعذر تنزيل هذا الفيديو".into()
+                } else {
+                    raw
+                };
             }
         }
 
@@ -1272,4 +1552,54 @@ fn spawn_download(id: String, use_preloaded: bool) {
             emit_progress(json!({ "id": id, "done": true }));
         }
     });
+}
+
+fn download_output_template(custom_output_title: bool, base_title: &str, file_tag: &str) -> String {
+    if custom_output_title {
+        let escaped = clean_stem(base_title).replace('%', "%%");
+        format!("{escaped} [{file_tag}].%(ext)s")
+    } else {
+        format!("%(title).150B [{file_tag}].%(ext)s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_header_extracts_scheme_and_host_only() {
+        assert_eq!(origin_header("https://cinejoy.pk/watch/tv/247718/1/1"), Some("https://cinejoy.pk".into()));
+        assert_eq!(origin_header("HTTP://Example.COM:8080/a?x=1#y"), Some("http://example.com:8080".into()));
+        assert_eq!(origin_header("https://user:pass@evil.com/x"), None);
+        assert_eq!(origin_header("file:///C:/video.mp4"), None);
+    }
+
+    #[test]
+    fn upgrades_generic_manifest_titles_to_page_title() {
+        assert_eq!(clean_title_hint("master", Some("MobLand S1:E1 - Cinejoy"), None), "MobLand S1:E1 - Cinejoy");
+        assert_eq!(clean_title_hint("9bed7798-15c9-4029-8db0-986374f90868", None, Some("Episode 1")), "Episode 1");
+        assert_eq!(clean_title_hint("Official Music Video", Some("YouTube"), None), "Official Music Video");
+    }
+
+    #[test]
+    fn classifies_tls_drm_auth_bot_and_unsupported_errors() {
+        assert_eq!(classify_probe_error("ERROR: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed"), ProbeErrorKind::TlsError);
+        assert_eq!(classify_probe_error("ERROR: This video is DRM protected (Widevine)"), ProbeErrorKind::DrmProtected);
+        assert_eq!(classify_probe_error("ERROR: Sign in to view this private video"), ProbeErrorKind::AuthRequired);
+        assert_eq!(classify_probe_error("ERROR: Unable to download webpage: HTTP Error 403 (Cloudflare)"), ProbeErrorKind::BotChallenge);
+        assert_eq!(classify_probe_error("ERROR: Unsupported URL: https://cinejoy.pk/watch/tv/247718/1/1"), ProbeErrorKind::UnsupportedUrl);
+        assert_eq!(classify_probe_error("ERROR: Read timed out."), ProbeErrorKind::Timeout);
+
+        let tls = probe_error_response(ProbeErrorKind::TlsError);
+        assert_eq!(tls["ok"], false);
+        assert_eq!(tls["error"], "tls-error");
+        assert!(tls["message"].as_str().unwrap_or("").contains("TLS"));
+    }
+
+    #[test]
+    fn custom_output_template_avoids_generic_title_and_escapes_percent() {
+        assert_eq!(download_output_template(true, "100% Live: Ep 1", "1080p"), "100%% Live Ep 1 [1080p].%(ext)s");
+        assert_eq!(download_output_template(false, "Any", "720p"), "%(title).150B [720p].%(ext)s");
+    }
 }

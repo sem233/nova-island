@@ -6,6 +6,9 @@
 //! `require('electron')` stand-in in `bridge/electron-shim.js`.
 use std::{cell::RefCell, rc::Rc, sync::mpsc};
 
+pub mod sniff;
+pub use sniff::{sniff_stream, SniffBlock, SniffResult};
+
 use serde_json::{json, Value};
 use webview2_com::{Microsoft::Web::WebView2::Win32::*, *};
 use windows::{

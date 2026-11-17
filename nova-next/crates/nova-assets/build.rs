@@ -171,7 +171,12 @@ const PATCHES: &[(&str, &str, &str)] = &[
     (
         "renderer.js",
         "const NO_DRAG = 'button, input, .slider, .file, .app, .pick, .picker, .clip-item, .shelf-items';",
-        "const NO_DRAG = 'button, input, textarea, .slider, .file, .app, .pick, .picker, .clip-item, .shelf-items, .vdl-drawer, .qc-list, .qc-textarea, .qc-add-panel, .qc-action-btn, .qc-icon-btn, .qc-btn, .qc-row';",
+        "const NO_DRAG = 'button, input, textarea, .slider, .file, .app, .pick, .picker, .clips, .clip-item, .clip-row, .clip-list, .clip-full, .clip-full-text, .shelf-items, .vdl-drawer, .vdl-list, .dl-list, .tk-list, .news-list, .qc-list, .qc-textarea, .qc-add-panel, .qc-action-btn, .qc-icon-btn, .qc-btn, .qc-row';",
+    ),
+    (
+        "renderer.js",
+        "  if (e.target.closest('.picker-list, .clip-list, .shelf-items') || state.vol === null) return;\n",
+        "  if (e.target?.closest?.('.picker-list, .clips, .clip-list, .clip-full, .clip-full-text, .clip-row, .shelf-items, .dl-list, .tk-list, .qc-list, .vdl-list, .news-list') || state.vol === null) return;\n",
     ),
     (
         "renderer.js",

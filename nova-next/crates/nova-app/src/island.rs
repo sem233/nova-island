@@ -43,11 +43,20 @@ pub fn create(wndproc: WNDPROC) -> windows::core::Result<HWND> {
 pub struct Window {
     pub hwnd: HWND,
     pos: Cell<(f64, f64)>,
+    ignore_mouse: Cell<bool>,
+    #[cfg(test)]
+    test_visible: Cell<bool>,
 }
 
 impl Window {
     pub fn new(hwnd: HWND) -> Window {
-        Window { hwnd, pos: Cell::new((f64::NAN, f64::NAN)) }
+        Window {
+            hwnd,
+            pos: Cell::new((f64::NAN, f64::NAN)),
+            ignore_mouse: Cell::new(true),
+            #[cfg(test)]
+            test_visible: Cell::new(true),
+        }
     }
 
     pub fn pos(&self) -> (f64, f64) {
@@ -60,6 +69,9 @@ impl Window {
             return;
         }
         self.pos.set((x, y));
+        if self.hwnd.0.is_null() {
+            return;
+        }
         let d = screen::nearest(x + WIN_W / 2.0, y + WIN_H / 2.0);
         let (px, py) = d.to_phys(x, y);
         let (w, h) = ((WIN_W * d.scale).round() as i32, (WIN_H * d.scale).round() as i32);
@@ -69,6 +81,10 @@ impl Window {
     }
 
     pub fn visible(&self) -> bool {
+        #[cfg(test)]
+        if self.hwnd.0.is_null() {
+            return self.test_visible.get();
+        }
         unsafe { IsWindowVisible(self.hwnd).as_bool() }
     }
 
@@ -107,6 +123,9 @@ impl Window {
     }
 
     fn ex_style(&self, add: WINDOW_EX_STYLE, remove: WINDOW_EX_STYLE) {
+        if self.hwnd.0.is_null() {
+            return;
+        }
         unsafe {
             let ex = GetWindowLongPtrW(self.hwnd, GWL_EXSTYLE) as u32;
             let next = (ex | add.0) & !remove.0;
@@ -118,11 +137,16 @@ impl Window {
 
     /// setIgnoreMouseEvents: clicks fall through to the window below
     pub fn set_ignore_mouse(&self, on: bool) {
+        self.ignore_mouse.set(on);
         if on {
             self.ex_style(WS_EX_TRANSPARENT | WS_EX_LAYERED, WINDOW_EX_STYLE(0));
         } else {
             self.ex_style(WINDOW_EX_STYLE(0), WS_EX_TRANSPARENT | WS_EX_LAYERED);
         }
+    }
+
+    pub fn ignore_mouse(&self) -> bool {
+        self.ignore_mouse.get()
     }
 
     /// setFocusable
@@ -135,6 +159,9 @@ impl Window {
     }
 
     pub fn focus(&self) {
+        if self.hwnd.0.is_null() {
+            return;
+        }
         unsafe {
             let _ = SetForegroundWindow(self.hwnd);
             let _ = SetFocus(Some(self.hwnd));

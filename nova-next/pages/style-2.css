@@ -28,19 +28,20 @@
 .clip-row.pinned + .clip-row:not(.pinned) { margin-top: 3px; box-shadow: 0 -1px 0 var(--fill-1); border-radius: 0 0 9px 9px; }
 .clip-full {
   position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; gap: 6px; padding: 8px 8px 8px 10px;
-  border-radius: inherit;
+  border-radius: inherit; min-height: 0; overflow: hidden;
   animation: clip-full-in .22s var(--ease-out, ease-out);
 }
 .clip-full[hidden] { display: none; }
 .clips.reading .clip-list, .clips.reading .clips-head { visibility: hidden; }
 @keyframes clip-full-in { from { opacity: 0; transform: translateY(4px); } }
-.clip-full-head { display: flex; align-items: center; gap: 4px; }
+.clip-full-head { flex: none; display: flex; align-items: center; gap: 4px; }
 .clip-full-meta { flex: 1; font-size: 11px; color: var(--text-3); }
 .clip-full.pinned [data-act="pin"] { color: rgb(var(--accent-rgb)); }
 .clip-full.pinned [data-act="pin"] svg { fill: currentColor; }
 .clip-full.copied [data-act="copy"] { color: var(--green); }
 .clip-full-text {
-  flex: 1; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45;
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.45;
   color: var(--text-1); padding: 2px 4px 2px 2px; user-select: text; -webkit-user-select: text;
 }
 .clip-full-text::-webkit-scrollbar { width: 6px; }
@@ -108,10 +109,12 @@
 .tk-title { text-align: left; }
 
 /* the clipboard list scrolls inside its card (1.8.4): with several clips it grew past the island */
-.sys { min-height: 0; grid-template-rows: minmax(0, 1fr); }
-.sys > .card { min-height: 0; }
-.clips { min-height: 0; overflow: hidden; }
-.clip-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#v-system { min-height: 0; }
+.sys { height: 100%; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.sys > .card { min-height: 0; height: 100%; }
+.clips { position: relative; min-height: 0; overflow: hidden; }
+.clips-head { flex: none; }
+.clip-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
 .clip-list::-webkit-scrollbar { width: 5px; }
 .clip-list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .28); border-radius: 3px; }
 .clip-list::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .45); }

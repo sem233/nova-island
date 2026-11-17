@@ -148,11 +148,32 @@ impl Tabs {
             let mut out = Vec::new();
             for i in 0..items.Length().ok()? {
                 let r = items.GetElement(i).ok()?.CachedBoundingRectangle().ok()?;
-                if r.right > r.left && r.bottom > r.top {
-                    out.push(format!("[{},{},{},{}]", r.left, r.top, r.right - r.left, r.bottom - r.top));
+                if let Some([x, y, w, h]) = filter_tab_rect(r.left, r.top, r.right, r.bottom) {
+                    out.push(format!("[{x},{y},{w},{h}]"));
                 }
             }
             Some(format!("[{}]", out.join(",")))
         }
+    }
+}
+
+/// Filters out empty rects and oversized non-tab UIA elements (`> 120px` tall).
+pub fn filter_tab_rect(left: i32, top: i32, right: i32, bottom: i32) -> Option<[i32; 4]> {
+    let w = right.saturating_sub(left);
+    let h = bottom.saturating_sub(top);
+    (w > 0 && h > 0 && h <= 120).then_some([left, top, w, h])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::filter_tab_rect;
+
+    #[test]
+    fn tab_rect_sanity_filters_empty_and_tall() {
+        assert_eq!(filter_tab_rect(100, 0, 280, 42), Some([100, 0, 180, 42]));
+        assert_eq!(filter_tab_rect(100, 0, 280, 120), Some([100, 0, 180, 120]));
+        assert_eq!(filter_tab_rect(100, 0, 280, 121), None);
+        assert_eq!(filter_tab_rect(200, 0, 200, 40), None);
+        assert_eq!(filter_tab_rect(100, 50, 200, 40), None);
     }
 }

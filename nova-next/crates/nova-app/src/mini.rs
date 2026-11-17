@@ -460,7 +460,7 @@ mod tests {
         assert_eq!(youtube_id("https://www.youtube.com/shorts/abcdefghijk").as_deref(), Some("abcdefghijk"));
         assert_eq!(youtube_id("https://www.youtube.com/watch?v=short"), None);
         assert_eq!(query("a b&ج"), "a+b%26%D8%AC");
-        assert!(app_id_ok("Chrome") && app_id_ok("MSEdge") && !app_id_ok("a b") && !app_id_ok(""));
+        assert!(app_id_ok("Chrome") && app_id_ok("MSEdge") && app_id_ok("a b") && !app_id_ok("a/b") && !app_id_ok(""));
         assert_eq!(browser_proc("Chrome"), Some("chrome"));
         assert_eq!(browser_proc("Spotify.exe"), None);
     }

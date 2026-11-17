@@ -412,9 +412,13 @@ impl Core {
         self.save_position();
         // don't pop the island open right after a move; re-arm when the cursor leaves
         self.suppress_until_leave = true;
-        (self.send)("hover", json!(false));
-        // dropped onto the tabs, or off them
-        self.update_ghost();
+        if self.active {
+            self.set_active(false);
+        } else {
+            (self.send)("hover", json!(false));
+            // dropped onto the tabs, or off them
+            self.update_ghost();
+        }
     }
 
     pub fn update_visibility(&mut self) {
@@ -437,11 +441,15 @@ impl Core {
             let n = |k: &str| o.get(k).and_then(Value::as_i64).unwrap_or(0) as i32;
             screen::rect_to_dip(n("x"), n("y"), n("w"), n("h"))
         });
-        if next != self.browser_rect {
-            self.browser_rect = next;
-            if !self.active && !self.clickable {
-                self.update_line();
-            }
+        let changed = next != self.browser_rect;
+        self.browser_rect = next;
+        if self.browser_rect.is_none() && !self.tab_rects.is_empty() {
+            self.tab_rects.clear();
+            self.update_ghost();
+            return;
+        }
+        if changed && !self.active && !self.clickable {
+            self.update_line();
         }
     }
 
@@ -456,16 +464,21 @@ impl Core {
 
     pub fn update_ghost(&mut self) {
         let mut over = false;
-        // opened (by the mouse or a notification): it stays as it is until it closes again
+        // opened (by the mouse or a notification) or pinned: stays opaque and interactive until closed
         if self.active || self.clickable || self.pinned {
+            if self.ghost {
+                self.ghost = false;
+            }
             self.update_dim();
             return;
         }
         self.update_line();
         if !self.features.bool("addrIsland") && !self.browser_line() && self.rest_rect.width > 0.0 {
             let (wx, wy) = self.win.pos();
-            let (x, y, r) = (wx + self.rest_rect.x, wy + self.rest_rect.y, self.rest_rect);
-            over = self.tab_rects.iter().any(|t| x < t.x + t.width && x + r.width > t.x && y < t.y + t.height && y + r.height > t.y);
+            if !wx.is_nan() && !wy.is_nan() {
+                let (x, y, r) = (wx + self.rest_rect.x, wy + self.rest_rect.y, self.rest_rect);
+                over = self.tab_rects.iter().any(|t| x < t.x + t.width && x + r.width > t.x && y < t.y + t.height && y + r.height > t.y);
+            }
         }
         if !over {
             self.ghost_open = false;
@@ -480,23 +493,39 @@ impl Core {
         self.update_dim();
     }
 
-    /// Half opacity while the island lets clicks through to the browser; a notification that
-    /// can be clicked shows at full strength.
+    /// Gentle dim while the idle pill lets clicks through to a browser tab underneath; active,
+    /// pinned, toggled, or clickable states always display at full opacity.
     fn update_dim(&mut self) {
-        let dim = self.ghost && !self.clickable;
+        let dim = self.ghost && !self.clickable && !self.active && !self.pinned && !self.ghost_open;
         if dim != self.dimmed {
             self.dimmed = dim;
             (self.send)(DIM, json!(dim));
         }
     }
 
+    /// Re-sends the current dim state after a page reload (`island-ready`).
+    pub fn sync_dim(&self) {
+        (self.send)(DIM, json!(self.dimmed));
+    }
+
     pub fn set_clickable(&mut self, on: bool) {
         self.clickable = on;
-        // it's gone: over the browser the island lets the mouse through again (and doesn't open)
-        if !on && self.ghost && !self.ghost_open && !self.pinned {
-            self.set_active(false);
+        if on {
+            self.ghost = false;
+            if self.inside && !self.suppress_until_leave {
+                self.set_active(true);
+            }
+            self.update_dim();
+            return;
         }
-        self.update_dim();
+        // Interactive toast/banner closed: return to click-through only when cursor is outside
+        // and the island isn't pinned or toggled open.
+        if !self.inside && !self.ghost_open && !self.pinned {
+            self.set_active(false);
+            self.update_ghost();
+        } else {
+            self.update_dim();
+        }
     }
 
     pub fn set_pinned(&mut self, on: bool) {
@@ -504,26 +533,39 @@ impl Core {
         if on {
             self.ghost_open = true;
             self.ghost = false;
-        } else if self.ghost_open {
+            if self.inside && !self.suppress_until_leave {
+                self.set_active(true);
+            }
+            self.update_dim();
+        } else {
             self.ghost_open = false;
+            if !self.inside && !self.clickable {
+                self.set_active(false);
+            }
             self.update_ghost();
         }
-        self.update_dim();
     }
 
     /// Ctrl+Alt+I
     pub fn toggle(&mut self) {
-        if self.ghost {
+        if !self.pinned {
             self.ghost_open = true;
-            self.update_ghost();
+            self.ghost = false;
+            if self.inside && !self.suppress_until_leave {
+                self.set_active(true);
+            }
+            self.update_dim();
         }
         (self.send)("toggle", Value::Null);
     }
 
     pub fn set_island_rect(&mut self, r: Rect) {
         self.island_rect = r;
-        if !self.active && !self.clickable {
+        let is_expanded_rect = r.width > 410.0 && r.height > 70.0;
+        if !self.active && !self.clickable && !self.pinned && !self.ghost_open && !is_expanded_rect {
             self.pending_rest = Some((r, Instant::now()));
+        } else if self.pinned || self.ghost_open || is_expanded_rect {
+            self.pending_rest = None;
         }
     }
 
@@ -535,9 +577,13 @@ impl Core {
         self.win.set_ignore_mouse(!on);
         if !on {
             self.win.set_focusable(false);
+        } else {
+            self.ghost = false;
         }
         (self.send)("hover", json!(on));
-        if !on {
+        if on {
+            self.update_dim();
+        } else {
             self.update_ghost();
         }
     }
@@ -575,15 +621,21 @@ impl Core {
     // The island only becomes interactive after the cursor rests on it, so a quick sweep to a
     // browser tab underneath never gets caught.
     pub fn poll_cursor(&mut self) {
+        let (px, py) = screen::cursor();
+        self.poll_cursor_at(px, py, Instant::now());
+    }
+
+    pub fn poll_cursor_at(&mut self, px: f64, py: f64, now_ts: Instant) {
         // the line waiting to go: looked at again until it's back over the tabs or LINE_KEEP is up
         if self.line_off_since.is_some() && !self.active {
             self.update_line();
         }
-        // the pill's size at rest, once it has stopped changing for 300 ms
+        // the pill's size at rest, once it has held still (never an expanded panel rect)
         if let Some((r, t)) = self.pending_rest {
-            if self.active || self.clickable {
+            let is_expanded_rect = r.width > 410.0 && r.height > 70.0;
+            if self.active || self.clickable || self.pinned || self.ghost_open || is_expanded_rect {
                 self.pending_rest = None;
-            } else if t.elapsed().as_millis() >= 550 {
+            } else if now_ts.saturating_duration_since(t).as_millis() >= 550 {
                 self.pending_rest = None;
                 self.rest_rect = r;
                 self.update_ghost();
@@ -594,7 +646,6 @@ impl Core {
             self.clear_near();
             return;
         }
-        let (px, py) = screen::cursor();
         let (bx, by) = self.win.pos();
         let (x, y) = (px - bx, py - by);
         let r = self.island_rect;
@@ -604,15 +655,16 @@ impl Core {
         self.send_near(x, y, fx.hypot(fy));
         // the thin line is 4px: a little more room to rest the cursor on it
         let pad = if self.active { 8.0 } else if self.line { 6.0 } else { 2.0 };
-        let now = x >= r.x - pad && x <= r.x + r.width + pad && y >= r.y - pad && y <= r.y + r.height + pad;
+        let now = r.width > 0.0 && r.height > 0.0 && x >= r.x - pad && x <= r.x + r.width + pad && y >= r.y - pad && y <= r.y + r.height + pad;
         if now && !self.inside {
-            self.entered_at = Instant::now();
+            self.entered_at = now_ts;
         }
         self.inside = now;
+        let instant_wake = self.clickable || self.pinned || self.ghost_open;
         if !now {
             self.suppress_until_leave = false;
             self.set_active(false);
-        } else if !self.active && !self.suppress_until_leave && (!self.ghost || self.clickable) && self.entered_at.elapsed().as_millis() >= HOVER_INTENT_MS {
+        } else if !self.active && !self.suppress_until_leave && (instant_wake || (!self.ghost && now_ts.saturating_duration_since(self.entered_at).as_millis() >= HOVER_INTENT_MS)) {
             self.set_active(true);
         }
     }
@@ -644,5 +696,173 @@ impl Core {
         if on {
             self.win.focus();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc, time::Duration};
+
+    use windows::Win32::Foundation::HWND;
+
+    use super::*;
+
+    fn test_core() -> (Core, Rc<RefCell<Vec<(String, Value)>>>) {
+        let dir = std::env::temp_dir().join(format!("nova-core-test-{}", std::process::id()));
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let ev = events.clone();
+        let send = Box::new(move |ch: &str, val: Value| {
+            ev.borrow_mut().push((ch.to_string(), val));
+        });
+        let win = Window::new(HWND::default());
+        let mut core = Core::new(win, send, Store::new(dir.clone()), Features::load(Store::new(dir)));
+        let b = screen::primary().bounds;
+        let wx = b.x + (b.width - WIN_W) / 2.0;
+        let wy = b.y;
+        core.win.set_pos(wx, wy);
+        let pill = Rect { x: 202.0, y: 8.0, width: 236.0, height: 32.0 };
+        core.island_rect = pill;
+        core.rest_rect = pill;
+        (core, events)
+    }
+
+    fn overlapping_tab_json(core: &Core) -> Value {
+        let (wx, wy) = core.win.pos();
+        let dip_x = wx + core.rest_rect.x - 10.0;
+        let dip_y = wy + core.rest_rect.y - 4.0;
+        let dip_w = core.rest_rect.width + 20.0;
+        let dip_h = core.rest_rect.height + 8.0;
+        let d = screen::nearest(dip_x, dip_y);
+        let (px, py) = d.to_phys(dip_x, dip_y);
+        let pw = (dip_w * d.scale).round() as i32;
+        let ph = (dip_h * d.scale).round() as i32;
+        json!([[px, py, pw, ph]])
+    }
+
+    fn pill_center(core: &Core) -> (f64, f64) {
+        let (wx, wy) = core.win.pos();
+        (wx + core.island_rect.x + core.island_rect.width / 2.0, wy + core.island_rect.y + core.island_rect.height / 2.0)
+    }
+
+    #[test]
+    fn tab_overlap_enables_ghost_and_dim_and_preserves_click_through() {
+        let (mut core, events) = test_core();
+        let tabs = overlapping_tab_json(&core);
+        core.on_tabs(&tabs);
+
+        assert!(core.ghost, "ghost should turn on over tabs");
+        assert!(core.dimmed(), "idle pill should dim over tabs");
+        assert!(core.win.ignore_mouse(), "idle ghost pill must remain click-through");
+        assert!(events.borrow().iter().any(|(c, v)| c == DIM && v == &json!(true)));
+
+        let (cx, cy) = pill_center(&core);
+        let t0 = Instant::now();
+        core.poll_cursor_at(cx, cy, t0);
+        core.poll_cursor_at(cx, cy, t0 + Duration::from_millis(400));
+
+        assert!(!core.active(), "hovering idle ghost pill over tabs must stay click-through");
+        assert!(core.win.ignore_mouse());
+        assert!(core.dimmed());
+    }
+
+    #[test]
+    fn clickable_prompt_is_opaque_and_clickable_without_hover_delay() {
+        let (mut core, _) = test_core();
+        core.on_tabs(&overlapping_tab_json(&core));
+        assert!(core.dimmed());
+        assert!(core.win.ignore_mouse());
+
+        core.set_clickable(true);
+        assert!(!core.dimmed(), "clickable notification over tabs must not appear dimmed");
+
+        let (cx, cy) = pill_center(&core);
+        let t0 = Instant::now();
+        // Immediate entry (0ms elapsed < HOVER_INTENT_MS) must unlock clicks immediately.
+        core.poll_cursor_at(cx, cy, t0);
+        assert!(core.active(), "clickable island must capture fast clicks without 280ms delay");
+        assert!(!core.win.ignore_mouse());
+        assert!(!core.dimmed());
+    }
+
+    #[test]
+    fn clearing_clickable_while_cursor_inside_keeps_interaction_until_leave() {
+        let (mut core, _) = test_core();
+        core.on_tabs(&overlapping_tab_json(&core));
+        core.set_clickable(true);
+
+        let (cx, cy) = pill_center(&core);
+        let t0 = Instant::now();
+        core.poll_cursor_at(cx, cy, t0);
+        assert!(core.active());
+
+        // Interactive toast expires while the user still hovers the island.
+        core.set_clickable(false);
+        assert!(core.active(), "clearing clickable under cursor must not drop clicks mid-interaction");
+        assert!(!core.win.ignore_mouse());
+        assert!(!core.dimmed(), "active island must remain opaque while cursor is inside");
+
+        // Moving the cursor off cleanly resumes click-through over tabs.
+        let (wx, wy) = core.win.pos();
+        core.poll_cursor_at(wx - 50.0, wy + 250.0, t0 + Duration::from_millis(50));
+        assert!(!core.active());
+        assert!(core.win.ignore_mouse());
+        assert!(core.dimmed());
+    }
+
+    #[test]
+    fn pinned_and_toggled_over_tabs_stays_opaque_and_responsive() {
+        let (mut core, _) = test_core();
+        core.on_tabs(&overlapping_tab_json(&core));
+        assert!(core.dimmed());
+
+        core.toggle();
+        assert!(!core.dimmed(), "Ctrl+Alt+I toggle must clear dim over tabs");
+        core.set_pinned(true);
+        assert!(!core.dimmed());
+
+        let (cx, cy) = pill_center(&core);
+        core.poll_cursor_at(cx, cy, Instant::now());
+        assert!(core.active(), "pinned island must respond immediately to cursor entry");
+        assert!(!core.win.ignore_mouse());
+        assert!(!core.dimmed());
+
+        let (wx, wy) = core.win.pos();
+        core.poll_cursor_at(wx - 40.0, wy + 250.0, Instant::now());
+        core.set_pinned(false);
+        assert!(!core.active());
+        assert!(core.win.ignore_mouse());
+        assert!(core.dimmed(), "unpinning outside cursor returns cleanly to click-through");
+    }
+
+    #[test]
+    fn leaving_browser_clears_stale_tabs_and_dim() {
+        let (mut core, _) = test_core();
+        let (wx, wy) = core.win.pos();
+        core.on_browser(&json!({ "x": wx as i32, "y": 0, "w": 1200, "h": 800 }));
+        core.on_tabs(&overlapping_tab_json(&core));
+        assert!(core.dimmed());
+
+        core.on_browser(&Value::Null);
+        assert!(!core.dimmed(), "leaving browser must clear stale tab dimming immediately");
+        assert!(!core.ghost);
+
+        let (cx, cy) = pill_center(&core);
+        let t0 = Instant::now();
+        core.poll_cursor_at(cx, cy, t0);
+        core.poll_cursor_at(cx, cy, t0 + Duration::from_millis(320));
+        assert!(core.active(), "island must open normally on hover once browser is gone");
+        assert!(!core.win.ignore_mouse());
+    }
+
+    #[test]
+    fn expanded_rect_never_poisons_rest_rect() {
+        let (mut core, _) = test_core();
+        assert_eq!(core.rest_rect.width, 236.0);
+
+        core.set_island_rect(Rect { x: 46.0, y: 8.0, width: 548.0, height: 232.0 });
+        let (wx, wy) = core.win.pos();
+        core.poll_cursor_at(wx - 50.0, wy + 250.0, Instant::now() + Duration::from_millis(650));
+
+        assert_eq!(core.rest_rect.width, 236.0, "expanded panel dimensions must never overwrite rest_rect");
     }
 }

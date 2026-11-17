@@ -715,7 +715,9 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
         "island-ready" => {
             nova_core::log::info("island ready");
             crate::set_page_alive(true);
-            app.borrow_mut().core.relayout();
+            let mut s = app.borrow_mut();
+            s.core.relayout();
+            s.core.sync_dim();
             Value::Null
         }
         // --- Video Downloader (MDM) — cancel a running download, list active IDs ---

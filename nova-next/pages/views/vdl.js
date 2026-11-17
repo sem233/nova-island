@@ -202,6 +202,7 @@
     const key = lastTrackKey;
     const seq = probeSeq;
     const probeUrl = vdlProbeData?.url || '';
+    const sourcePage = vdlProbeData?.sourcePage || '';
     const titleHint = vdlProbeData?.title || m.title || '';
     const thumbnail = vdlProbeData?.thumbnail || m.art || '';
     closeVdlPicker(true);
@@ -213,6 +214,7 @@
         app: m.app || '',
         title: m.title || '',
         url: probeUrl,
+        sourcePage,
         titleHint,
         thumbnail,
         choice,
@@ -349,7 +351,7 @@
         const errMsg = res?.error === 'no-url'
           ? 'افتح الفيديو في المتصفح أو انسخ رابطه'
           : (res?.message || 'تعذر العثور على جودات الفيديو');
-        vdlShow(errMsg, 'err', 4500);
+        vdlShow(errMsg, 'err', 6500);
       }
       doRender();
     });
