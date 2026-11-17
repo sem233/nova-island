@@ -62,6 +62,16 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.9
+
+**Reliable SPA & HLS video extraction** — added an audio-muted WebView2 runtime stream sniffer fallback for JavaScript-rendered video pages (such as `cinejoy.pk`), separated `sourcePage` / `Referer` / `Origin` headers for both probing and downloading via `yt-dlp`, upgraded generic stream filenames (e.g. `master`) to clean page titles, restored strict TLS certificate verification, and surfaced specific error messages for TLS, DRM, login walls, anti-bot gates, and unsupported links.
+
+**Clipboard scrolling in System** — fixed flex/grid overflow sizing, wheel-event routing, and drag exclusions so scrolling inside both `#clip-list` and long `.clip-full-text` snippets works smoothly without changing system volume or dragging the island window.
+
+**Overlay click-through & dim fixes** — fixed stuck dimming (`nova-dim`) and unclickable states across `ghost`, `clickable`, `pinned`, and `toggle` transitions, cleared stale browser tab intersections immediately on window switch, prevented expanded panel geometry from overwriting collapsed `rest_rect`, and raised overlay dim opacity cleanly while preserving intended click-through over browser tabs.
+
+**UTF-8 QuickClips & test reliability** — kept UTF-8-safe clip truncation (`clips.rs`) and made calendar parity tests deterministic across CI timezones (`cargo test --workspace --locked`).
+
 ## What's new in 1.8.8
 
 **Video downloader (MDM)** — download any video or high-quality MP3 stream from the browser in one click. Hover the download button to pre-fetch formats instantly; pick 4K, 1080p, 720p, 480p, 360p or MP3 320 k from the quality drawer. Requires [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org/) in PATH or beside the app.

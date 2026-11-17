@@ -79,7 +79,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: nova-island-${{ github.ref_name || inputs.tag || 'manual' }}
+          name: nova-island-${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.tag || github.run_number }}
           path: |
             nova-next/target/dist/Nova-Island-Setup-*.exe
             nova-next/target/dist/Nova-Island-*-Portable.exe

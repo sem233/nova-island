@@ -1,4 +1,4 @@
-// Video Downloader (MDM) UI controller for Nova Island — v1.8.8
+// Video Downloader (MDM) UI controller for Nova Island — v1.8.9
 (() => {
   const $ = (s) => document.querySelector(s);
   const bridge = window.nova || window.bridge;
