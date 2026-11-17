@@ -167,14 +167,59 @@ body[data-theme="madar"] .pr-next::after { box-shadow: 14px 14px 0 0 rgba(147, 2
 body[data-theme="madar"] .pr-bell.on { background: rgba(147, 228, 200, .14); color: #93e4c8; }
 body[data-theme="madar"] .pr-row.next { background: rgba(147, 228, 200, .12); box-shadow: inset 0 0 0 .5px rgba(147, 228, 200, .35); }
 
-/* (1.8.7) The thin line (Settings › In the browser › Thin line, and while typing in the address
-   bar): 120 x 4, solid in the theme's text colour so it is seen over any tab strip */
+/* (1.8.11) Browser-tabs minimal handle ("Thin line"): clean top-docked micro-notch with
+   centered theme-accent indicator; hides --th-deco/.glow/.sheen bloat so solid themes never
+   paint sliced gradients or blobs across browser tabs. */
 #island.addr-line:not(.vertical).idle, #island.addr-line:not(.vertical).compact,
-#island.addr-line:not(.vertical).compact.c-wide { --w: 120px; --h: 4px; --r: 2px; }
-#island.addr-line:not(.vertical).idle .clip, #island.addr-line:not(.vertical).compact .clip { background: var(--text-1, #fff) !important; opacity: .85; }
-#island.addr-line:not(.vertical).idle .tint, #island.addr-line:not(.vertical).compact .tint,
-#island.addr-line:not(.vertical).idle .sheen, #island.addr-line:not(.vertical).compact .sheen { opacity: 0; }
-#island.addr-line:not(.vertical).idle #bd, #island.addr-line:not(.vertical).compact #bd { display: none; }
+#island.addr-line:not(.vertical).compact.c-wide {
+  --w: 96px; --h: 6px; --r: 6px;
+  --tl: 0px; --tr: 0px; --bl: 6px; --br: 6px;
+}
+#island.addr-line:not(.vertical).idle .clip,
+#island.addr-line:not(.vertical).compact .clip {
+  background: var(--th-prev, rgba(22, 24, 30, .92)) !important;
+  opacity: .96;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .28);
+}
+#island.addr-line:not(.vertical).idle .clip::before,
+#island.addr-line:not(.vertical).compact .clip::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 36px;
+  height: 2px;
+  transform: translateX(-50%);
+  border-radius: 99px;
+  background: var(--th-hi, rgba(255, 255, 255, .8));
+  opacity: .9;
+  pointer-events: none;
+}
+#island.addr-line:not(.vertical).idle .clip::after,
+#island.addr-line:not(.vertical).compact .clip::after,
+#island.addr-line:not(.vertical).idle .tint,
+#island.addr-line:not(.vertical).compact .tint,
+#island.addr-line:not(.vertical).idle .glow,
+#island.addr-line:not(.vertical).compact .glow {
+  opacity: 0 !important;
+  background: none !important;
+}
+#island.addr-line:not(.vertical).idle .sheen,
+#island.addr-line:not(.vertical).compact .sheen {
+  opacity: 1 !important;
+  background: none !important;
+  box-shadow: inset 0 0 0 .5px var(--th-line, rgba(255, 255, 255, .22)) !important;
+}
+#island.addr-line:not(.vertical).idle::before,
+#island.addr-line:not(.vertical).compact::before,
+#island.addr-line:not(.vertical).idle::after,
+#island.addr-line:not(.vertical).compact::after {
+  display: none;
+}
+#island.addr-line:not(.vertical).idle #bd,
+#island.addr-line:not(.vertical).compact #bd {
+  display: none;
+}
 
 /* (1.8.7) the open island's top row: no clock and date (the closed island and the taskbar show
    the time); the bell and the gear stay on the right, and the tabs take the room it leaves */

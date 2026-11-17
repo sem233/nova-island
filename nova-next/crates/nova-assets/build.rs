@@ -373,7 +373,7 @@ const PATCHES: &[(&str, &str, &str)] = &[
     ("prefs/prefs.js", "  $('#browser-hint').textContent = f.addrIsland\n    ? 'Moves into the address bar, from its default place at the top'\n    : 'Stays where it is; clicks go to the tabs below';\n", "  $('#browser-hint').textContent = f.addrIsland\n    ? 'Moves into the address bar, from its default place at the top'\n    : f.browserLine\n      ? 'A thin line over the tabs; point at it to open the island'\n      : 'Stays where it is; clicks go to the tabs below';\n"),
     ("prefs/prefs.js", "  api.setFeatures({ addrIsland: b.dataset.browser === 'addr' });\n", "  api.setFeatures({ addrIsland: b.dataset.browser === 'addr', browserLine: b.dataset.browser === 'line' });\n"),
     // ...and the line a little longer and thicker than the address bar's was, so it is seen
-    ("renderer.js", "[w, h] = anchor.addr === 'line' ? [90, 3] : [anchor.sw, anchor.sh];", "[w, h] = anchor.addr === 'line' ? [120, 4] : [anchor.sw, anchor.sh];"),
+    ("renderer.js", "[w, h] = anchor.addr === 'line' ? [90, 3] : [anchor.sw, anchor.sh];", "[w, h] = anchor.addr === 'line' ? [96, 6] : [anchor.sw, anchor.sh];"),
     // (1.8.7) Settings › General: the Nova strip on the taskbar (nova-app/src/taskbar.rs). Off for
     // now and marked "Coming soon" (nova-core features.rs keeps taskbarStrip off)
     ("prefs/index.html", "            <label class=\"row\"><b>Hide in full screen</b>", "            <label class=\"row soon\"><div class=\"txt\"><b>Show on the taskbar</b><small>Coming soon</small></div><input type=\"checkbox\" class=\"sw\" disabled></label>\n            <label class=\"row\"><b>Hide in full screen</b>"),

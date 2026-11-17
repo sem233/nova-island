@@ -62,6 +62,12 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.11
+
+**Sleeker browser-tab indicator ("Thin line")** — redesigned the `#island.addr-line` browser-tab micro-notch (`96×6 px`) across all themes so theme decorations (`--th-deco`), update dots, cat ears, and blur backdrop artifacts no longer bleed across Chrome/Edge tab headers; replaces the harsh striped bar with a clean top-docked capsule and centered theme-accent handle that expands smoothly into the full island on hover or click.
+
+**Clean release artifact staging** — cleared cached installer executables in the GitHub Actions release workflow before building NSIS packages so only the active release's setup, portable executable, and `latest.yml` manifest are published.
+
 ## What's new in 1.8.10
 
 **Island Calculator add-on** — click the new calculator icon next to News/Settings in the expanded topbar to open a compact DPI-scaled calculator (`+`, `−`, `×`, `÷`, decimals) with live preview, standard operator precedence, Arabic-Indic digit normalization (`٠-٩`, `٫`), LTR display/grid preservation in Arabic UI, hold-to-repeat backspace, full theme & blur/solid/no-animation support, and an on/off toggle under **Settings › Island › Tools › Calculator**.

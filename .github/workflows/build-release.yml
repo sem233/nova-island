@@ -70,7 +70,9 @@ jobs:
 
       - name: Build installer & portable (NSIS)
         shell: powershell
-        run: powershell -ExecutionPolicy Bypass -File nova-next\installer\build.ps1
+        run: |
+          Remove-Item -Force -ErrorAction SilentlyContinue nova-next\target\dist\Nova-Island-*.exe, nova-next\target\dist\latest.yml
+          powershell -ExecutionPolicy Bypass -File nova-next\installer\build.ps1
 
       - name: Generate latest.yml
         shell: powershell
