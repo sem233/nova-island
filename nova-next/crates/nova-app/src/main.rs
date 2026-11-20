@@ -74,6 +74,8 @@ thread_local! {
     static PAGE_ALIVE: Cell<bool> = const { Cell::new(true) };
     static CALC_PREV_FG: Cell<isize> = const { Cell::new(0) };
     static CALC_BTN_DOWN: Cell<bool> = const { Cell::new(false) };
+    static PAGE_SUSPENDED: Cell<bool> = const { Cell::new(false) };
+    static PAGE_LOW_MEM: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn remember_calc_prev_fg(island_hwnd: HWND) {
@@ -95,6 +97,34 @@ pub fn restore_calc_prev_fg(island_hwnd: HWND) {
             }
         }
     }
+}
+
+/// Syncs WebView2 memory target and system stats polling with whether the island is currently open.
+fn sync_page_power(a: &Rc<RefCell<App>>) {
+    let (open, slow, visible, page, system) = {
+        let s = a.borrow();
+        (s.core.is_open(), s.glass.perf(&s.core.features).slow(), s.core.win.visible(), s.page.clone(), s.system.clone())
+    };
+    if !visible {
+        return;
+    }
+    let want_low = !open;
+    if PAGE_LOW_MEM.with(|m| m.replace(want_low)) != want_low {
+        if let Some(p) = page {
+            p.set_low_memory(want_low);
+        }
+        system.set_stats_every(if slow || want_low { 5000 } else { 2000 });
+    }
+}
+
+/// Signature of fields in `nova-sys` output that affect the island UI (excludes `idle`, `omni`, `browser`, `tabs`, `clip`, `rec`).
+fn media_sig(v: &Value) -> String {
+    format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        v["has"], v["playing"], v["title"], v["artist"], v["album"], v["app"],
+        v["dur"], v["pos"], v["thumb"], v["vol"], v["muted"], v["bright"],
+        v["fs"], v["kl"], v["caps"], v["fgProc"], v["fgTitle"], v["bat"], v["ac"]
+    )
 }
 
 /// The island page answers again ("island-ready") or stopped (its process failed).
@@ -408,6 +438,7 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                         let next = s.core.next_poll_ms();
                         drop(s);
                         schedule_cursor(h, next);
+                        sync_page_power(&a);
                         if now && !was {
                             schedule_capture(h, 60);
                         }
@@ -606,7 +637,8 @@ pub fn features_changed(a: &Rc<RefCell<App>>, before: &Value) {
         p.event("features", now.clone());
     }
     let slow = s.glass.perf(&s.core.features).slow();
-    s.system.set_stats_every(if slow { 5000 } else { 2000 });
+    let low = !s.core.is_open();
+    s.system.set_stats_every(if slow || low { 5000 } else { 2000 });
     if now["asrHanafi"] != before["asrHanafi"] || now["hijriAdjust"] != before["hijriAdjust"] {
         s.prayer.refresh();
     }
@@ -730,9 +762,30 @@ fn drain_sys(a: &Rc<RefCell<App>>) {
         }
         // (1.8.7) the Nova strip on the taskbar, when it's on
         taskbar::on_line(a, &data);
-        let page = a.borrow().page.clone();
-        if let Some(p) = page {
-            p.event("media", data);
+        if PAGE_SUSPENDED.with(|p| p.get()) {
+            continue;
+        }
+        let sig = media_sig(&data);
+        let idle_lt_5 = data.get("idle").and_then(Value::as_i64).is_some_and(|i| i < 5);
+        let should_push = {
+            thread_local! {
+                static LAST_MEDIA: RefCell<(String, bool, Instant)> = RefCell::new((String::new(), true, Instant::now() - Duration::from_secs(60)));
+            }
+            LAST_MEDIA.with(|cell| {
+                let mut last = cell.borrow_mut();
+                if sig != last.0 || idle_lt_5 != last.1 || last.2.elapsed() >= Duration::from_secs(5) {
+                    *last = (sig, idle_lt_5, Instant::now());
+                    true
+                } else {
+                    false
+                }
+            })
+        };
+        if should_push {
+            let page = a.borrow().page.clone();
+            if let Some(p) = page {
+                p.event("media", data);
+            }
         }
     }
 }
@@ -827,6 +880,18 @@ fn run() -> Result<(), String> {
         if let Some(p) = send_slot.borrow().as_ref() {
             if ch == core::DIM {
                 p.run(&format!("{DIM_JS}({})", data == true));
+            } else if ch == "visibility" {
+                let show = data == true;
+                if show && PAGE_SUSPENDED.with(|s| s.replace(false)) {
+                    p.set_suspended(false);
+                    PAGE_LOW_MEM.with(|m| m.set(false));
+                }
+                p.event(ch, data);
+                if !show && !PAGE_SUSPENDED.with(|s| s.get()) && arg("--test-idle").is_none() {
+                    PAGE_SUSPENDED.with(|s| s.set(true));
+                    PAGE_LOW_MEM.with(|m| m.set(true));
+                    p.set_suspended(true);
+                }
             } else {
                 p.event(ch, data);
             }
@@ -919,9 +984,10 @@ fn run() -> Result<(), String> {
     adhan::apply();
     // tests: --devtools-port N drives the pages from a script (its own WebView folder, so it
     // doesn't join the installed app's browser, which would ignore the port)
+    let base_args = "--autoplay-policy=no-user-gesture-required --disable-features=HardwareMediaKeyHandling --disable-background-networking --disable-sync --disable-default-apps --disable-component-update --disable-extensions --js-flags=--max-old-space-size=64";
     let (web_dir, web_args) = match arg("--devtools-port") {
-        Some(port) => (format!("{}\\Nova Island\\EBWebView-test", std::env::var("LOCALAPPDATA").unwrap_or_default()), format!("--autoplay-policy=no-user-gesture-required --disable-features=HardwareMediaKeyHandling --remote-debugging-port={port}")),
-        None => (format!("{}\\Nova Island\\EBWebView", std::env::var("LOCALAPPDATA").unwrap_or_default()), "--autoplay-policy=no-user-gesture-required --disable-features=HardwareMediaKeyHandling".to_string()),
+        Some(port) => (format!("{}\\Nova Island\\EBWebView-test", std::env::var("LOCALAPPDATA").unwrap_or_default()), format!("{base_args} --remote-debugging-port={port}")),
+        None => (format!("{}\\Nova Island\\EBWebView", std::env::var("LOCALAPPDATA").unwrap_or_default()), base_args.to_string()),
     };
     let env = nova_web::environment(&web_dir, &web_args).map_err(|e| format!("WebView2: {e}"))?;
     nova_core::log::info("startup: webview2");

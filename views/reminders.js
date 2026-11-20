@@ -146,6 +146,8 @@
       bar.style.width = `${Math.max(0, (state.reminderUntil - now) / total) * 100}%`;
       return;
     }
+    if (now - (tick.idleAt || 0) < 1000) return;
+    tick.idleAt = now;
     if (!feat('reminders')) return;
     if (!nextAt) schedule();
     if (now < nextAt) return;

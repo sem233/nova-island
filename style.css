@@ -1118,10 +1118,14 @@ body.no-anim .eq i { transform: scaleY(.55); }
 /* ============ no work for what isn't on screen ============ */
 /* the hidden layers stay in place (they fade in and out), so their endless animations would keep
    the island redrawing every frame; they pause until their layer is the one showing */
-#island .layer .eq i, #island .layer .c-ring .arr { animation-play-state: paused; }
+#island .layer .eq i, #island .layer .c-ring .arr,
+#island .l-toast.updating .ico-dl, #island .l-vtoast.updating .ico-dl { animation-play-state: paused; }
 #island:not(.vertical).idle .l-info .eq i, #island:not(.vertical).compact .l-compact .eq i, #island:not(.vertical).compact .l-compact .c-ring .arr,
 #island.vertical.compact .l-vcompact .eq i, #island.vertical.compact .l-vcompact .c-ring .arr,
-#island.peek .l-peek .eq i, #island.expanded .l-expanded .eq i { animation-play-state: running; }
+#island.peek .l-peek .eq i, #island.expanded .l-expanded .eq i,
+#island.toast .l-toast.updating .ico-dl, #island.toast .l-vtoast.updating .ico-dl { animation-play-state: running; }
+#island:not(.radio-on) .i-onair .eq i, #island:not(.expanded) #radio .rd-dot { animation-play-state: paused; }
+body.island-hidden #island *, body.island-hidden #island *::before, body.island-hidden #island *::after { animation-play-state: paused !important; }
 
 /* ============ themes (colors in themes.css) ============ */
 /* Original Nova resolves to exactly the look above. Nothing here moves: a theme costs the same as

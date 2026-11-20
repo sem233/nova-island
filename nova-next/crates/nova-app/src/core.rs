@@ -377,6 +377,11 @@ impl Core {
         self.active
     }
 
+    /// True when the island is expanded, pinned open, or showing a clickable card.
+    pub fn is_open(&self) -> bool {
+        self.active || self.clickable || self.pinned
+    }
+
     pub fn dragging(&self) -> bool {
         self.drag.is_some()
     }

@@ -392,6 +392,39 @@ impl Page {
         }
     }
 
+    /// Switches Chromium's memory usage target between LOW (collapsed/idle) and NORMAL (open).
+    pub fn set_low_memory(&self, low: bool) {
+        unsafe {
+            if let Ok(w19) = self.webview.cast::<ICoreWebView2_19>() {
+                let level = if low {
+                    COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_LOW
+                } else {
+                    COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL_NORMAL
+                };
+                let _ = w19.SetMemoryUsageTargetLevel(level);
+            }
+        }
+    }
+
+    /// Suspends WebView2 when the island window is hidden (user-hidden or fullscreen) and resumes on show.
+    pub fn set_suspended(&self, suspend: bool) {
+        unsafe {
+            if suspend {
+                let _ = self.controller.SetIsVisible(false);
+                self.set_low_memory(true);
+                if let Ok(w3) = self.webview.cast::<ICoreWebView2_3>() {
+                    let handler = TrySuspendCompletedHandler::create(Box::new(|_, _| Ok(())));
+                    let _ = w3.TrySuspend(&handler);
+                }
+            } else {
+                if let Ok(w3) = self.webview.cast::<ICoreWebView2_3>() {
+                    let _ = w3.Resume();
+                }
+                let _ = self.controller.SetIsVisible(true);
+            }
+        }
+    }
+
     /// Page errors and console.error/warn, through the DevTools protocol (what 1.7 forwards to the
     /// log as "[renderer] ..."). `on_line` gets one readable line per message.
     pub fn on_console(&self, on_line: impl FnMut(String) + 'static) -> Result<()> {

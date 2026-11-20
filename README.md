@@ -62,6 +62,10 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.12
+
+**Drastically lower idle RAM & CPU** — switches WebView2 to `MemoryUsageTargetLevel::LOW` whenever the island is resting collapsed and restores `NORMAL` on hover/pin/interaction, suspends WebView2 (`TrySuspend`) and pauses CSS animations when the island is hidden, deduplicates `media` IPC updates, slows idle stats/layout/reminder polling, and guards Prayer DOM updates so all animations and features stay identical while cutting idle memory and CPU usage dramatically.
+
 ## What's new in 1.8.11
 
 **Sleeker browser-tab indicator ("Thin line")** — redesigned the `#island.addr-line` browser-tab micro-notch (`96×6 px`) across all themes so theme decorations (`--th-deco`), update dots, cat ears, and blur backdrop artifacts no longer bleed across Chrome/Edge tab headers; replaces the harsh striped bar with a clean top-docked capsule and centered theme-accent handle that expands smoothly into the full island on hover or click.

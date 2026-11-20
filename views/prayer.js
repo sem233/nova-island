@@ -158,12 +158,16 @@
       target = now < imsak ? imsak : d.tomorrow?.times?.imsak ? at(d.tomorrow.date, d.tomorrow.times.imsak) : null;
     }
     if (!target) return;
-    $('#i-rmd-name').textContent = label;
-    $('#i-rmd-time').textContent = clock(target);
-    $('#i-rmd-left').textContent = left(target - now);
-    const ltr = (t) => `⁦${t}⁩`;
-    $('#pr-ramadan').textContent = `رمضان كريم · ${label} ${ltr(clock(target))} · بعد ${ltr(left(target - now))}`;
+    setText('#i-rmd-name', label);
+    setText('#i-rmd-time', clock(target));
+    setText('#i-rmd-left', left(target - now));
+    if (lastMode === 'expanded') {
+      const ltr = (t) => `⁦${t}⁩`;
+      setText('#pr-ramadan', `رمضان كريم · ${label} ${ltr(clock(target))} · بعد ${ltr(left(target - now))}`);
+    }
   }
+
+  const setText = (sel, val) => { const el = $(sel); if (el && el.textContent !== val) el.textContent = val; };
 
   // soft descending three-note bell (shared AudioContext, renderer.js playTones)
   const chime = () => playTones([[0, 784], [0.35, 659], [0.7, 523]], { peak: 0.18, attack: 0.03, decay: 1.4 });
@@ -173,26 +177,33 @@
     const d = days();
     zone = d?.today?.tz || '';
     view.classList.toggle('loading', !d);
-    $('.pr-slide').hidden = !d;
-    $('#v-pr-item').hidden = !d;
+    const prSlide = $('.pr-slide');
+    if (prSlide && prSlide.hidden !== !d) prSlide.hidden = !d;
+    const vPrItem = $('#v-pr-item');
+    if (vPrItem && vPrItem.hidden !== !d) vPrItem.hidden = !d;
     if (!d) return;
 
     const now = new Date();
     const next = nextPrayer(d, now);
+    const open = lastMode === 'expanded';
     if (next) {
       const ms = next.time - now;
-      $('#pr-next-name').textContent = NAMES[next.key];
-      $('#pr-count').textContent = left(ms);
-      $('#pr-next-time').textContent = `${next.time.toDateString() === now.toDateString() ? 'اليوم' : 'غدًا'} ${clock(next.time)}`;
-      $('#i-pr-name').textContent = NAMES[next.key];
-      $('#i-pr-time').textContent = clock(next.time);
-      $('#i-pr-left').textContent = left(ms);
-      $('#v-pr-name').textContent = NAMES[next.key];
-      $('#v-pr-left').textContent = shortLeft(ms);
+      if (open) {
+        setText('#pr-next-name', NAMES[next.key]);
+        setText('#pr-count', left(ms));
+        setText('#pr-next-time', `${next.time.toDateString() === now.toDateString() ? 'اليوم' : 'غدًا'} ${clock(next.time)}`);
+      }
+      setText('#i-pr-name', NAMES[next.key]);
+      setText('#i-pr-time', clock(next.time));
+      setText('#i-pr-left', left(ms));
+      setText('#v-pr-name', NAMES[next.key]);
+      setText('#v-pr-left', shortLeft(ms));
     }
-    $('#pr-hijri').textContent = d.today.hijri || '';
+    if (open) {
+      setText('#pr-hijri', d.today.hijri || '');
+      setText('#pr-city', [data.city, d.today.method].filter(Boolean).join(' · '));
+    }
     ramadan(d, now);
-    $('#pr-city').textContent = [data.city, d.today.method].filter(Boolean).join(' · ');
 
     // the list only changes when a prayer passes
     const key = `${d.today.date}-${next?.key}`;
@@ -223,6 +234,7 @@
       tick();
     }
   });
+  window.addEventListener('island:mode', (e) => { if (e.detail?.mode === 'expanded') tick(); });
   setInterval(tick, 1000);
   tick();
 })();

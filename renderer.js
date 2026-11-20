@@ -211,8 +211,8 @@ function reportRect() {
 // performance options on it only has to keep pace with the hover intent.
 const light = () => !!(state.features.noBlur || state.features.noAnimations || state.features.glassFreeze);
 setTimeout(function reportLoop() {
-  reportRect();
-  setTimeout(reportLoop, frameRunning || state.moving ? 50 : light() ? 300 : 250);
+  if (state.visible) reportRect();
+  setTimeout(reportLoop, !state.visible ? 600 : frameRunning || state.moving ? 50 : light() ? 500 : 400);
 }, 0);
 
 bridge.onToggle(() => {
@@ -1099,7 +1099,7 @@ bridge.onFeatures(applyFeatures);
 // a screen recorder is running (NVIDIA Instant Replay, OBS): a glass theme turns solid until it's gone
 bridge.onRecording((on) => document.body.classList.toggle('th-rec', !!on));
 bridge.onSaver((s) => showToast('saver', s.on ? 'Battery saver is on' : 'Battery saver is off', s.pct >= 0 ? `${s.pct}%` : '', 0, 3500));
-bridge.onVisibility((v) => { state.visible = !!v; });
+bridge.onVisibility((v) => { state.visible = !!v; document.body.classList.toggle('island-hidden', !v); });
 bridge.features().then(applyFeatures);
 $('#open-settings').addEventListener('click', () => bridge.openSettings());
 
