@@ -211,7 +211,21 @@ const PATCHES: &[(&str, &str, &str)] = &[
 ", "  <link rel=\"stylesheet\" href=\"prefs-2.css\">
   <script src=\"i18n-early.js\"></script>
 "),
-    ("prefs/index.html", "<small>Kept in memory only</small>", "<small>Kept in memory only; clips you pin are saved on this PC</small>"),
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><b>Screenshots</b><input type=\"checkbox\" class=\"sw\" data-feature=\"screenshotToast\"></label>\n",
+        "            <label class=\"row\"><b>Screenshots</b><input type=\"checkbox\" class=\"sw\" data-feature=\"screenshotToast\"></label>\n            <label class=\"row\"><div class=\"txt\"><b>Pin screenshots on screen</b><small>Keep captured regions floating at actual size above apps (PrtScn / Ctrl+Alt+S)</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"shotPinOverlay\"></label>\n",
+    ),
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><div class=\"txt\"><b>Clipboard history</b><small>Kept in memory only</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"clipboardHistory\"></label>\n",
+        "            <label class=\"row\"><div class=\"txt\"><b>Clipboard history</b><small>Keeps your recent copied text; private password copies are skipped</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"clipboardHistory\"></label>\n            <label class=\"row sub\" data-needs=\"clipboardHistory\"><div class=\"txt\"><b>Save history on this PC</b><small>Keep history after restarting; turning this off clears the saved file</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"clipPersist\"></label>\n            <div class=\"row sub\" data-needs=\"clipboardHistory\"><b>History limit</b>\n              <div class=\"stepper\" data-num=\"clipMaxItems\" data-steps=\"5,10,15,20,25,30,40,50\" data-unit=\"items\"><button type=\"button\" data-dir=\"-1\" aria-label=\"Less\">−</button><output></output><button type=\"button\" data-dir=\"1\" aria-label=\"More\">+</button></div>\n            </div>\n            <div class=\"row sub\" data-needs=\"clipboardHistory\"><b>Auto-clear after</b>\n              <div class=\"stepper\" data-num=\"clipExpireMinutes\" data-steps=\"0,5,15,30,60,180,360,720,1440,4320,10080\" data-unit=\"expire\"><button type=\"button\" data-dir=\"-1\" aria-label=\"Less\">−</button><output></output><button type=\"button\" data-dir=\"1\" aria-label=\"More\">+</button></div>\n            </div>\n",
+    ),
+    (
+        "prefs/prefs.js",
+        "  if (unit === 'min') return n >= 60 && n % 60 === 0 ? `${n / 60} h` : `${n} min`;\n",
+        "  if (unit === 'items') return `${n} items`;\n  if (unit === 'expire') return n === 0 ? 'Never' : n >= 1440 && n % 1440 === 0 ? `${n / 1440} day${n === 1440 ? '' : 's'}` : n >= 60 && n % 60 === 0 ? `${n / 60} h` : `${n} min`;\n  if (unit === 'min') return n >= 60 && n % 60 === 0 ? `${n / 60} h` : `${n} min`;\n",
+    ),
     // Desktop widgets (1.8): Settings › Widgets, after Island, the panel for the desktop's widgets
     // (pages/prefs/widgets.js fills it; the widgets themselves are native, nova-render)
     (

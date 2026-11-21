@@ -16,6 +16,7 @@ mod files;
 mod glass;
 mod idle_test;
 mod island;
+mod pin;
 mod prefs;
 mod radio;
 mod mini;
@@ -49,7 +50,7 @@ use windows::{
         Foundation::*,
         UI::{
             HiDpi::*,
-            Input::KeyboardAndMouse::{GetAsyncKeyState, RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_LBUTTON, VK_RBUTTON},
+            Input::KeyboardAndMouse::{GetAsyncKeyState, RegisterHotKey, UnregisterHotKey, MOD_ALT, MOD_CONTROL, MOD_NOREPEAT, VK_LBUTTON, VK_RBUTTON, VK_SNAPSHOT},
             WindowsAndMessaging::*,
         },
     },
@@ -67,6 +68,8 @@ const TIMER_SUSPEND: usize = 4;
 const TIMER_FINISH: usize = 5;
 const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
 const HOTKEY_TOGGLE: i32 = 1;
+const HOTKEY_SNIP: i32 = 2;
+const HOTKEY_SNIP_ALT: i32 = 3;
 
 /// (1.8.7) WM_SHOW_ISLAND's answer from a copy that's fine (its page alive).
 const SHOWN_OK: usize = 0x4e4f5641; // "NOVA"
@@ -241,6 +244,8 @@ pub struct App {
     /// The island's radio: {station, surah, playing, live}, for the Radio window.
     pub radio_now: Value,
     clip_seq: Option<u64>,
+    snip: pin::SnipTracker,
+    pending_pin_drag: Arc<Mutex<Option<RECT>>>,
     pub clips: clips::ClipsManager,
     pub data_dir: PathBuf,
 }
@@ -500,8 +505,9 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                         } else {
                             CALC_BTN_DOWN.with(|c| c.set(false));
                         }
+                        let snip_active = s.snip.poll_input();
                         let now = s.core.active();
-                        let next = s.core.next_poll_ms();
+                        let next = if snip_active { 40 } else { s.core.next_poll_ms() };
                         drop(s);
                         schedule_cursor(h, next);
                         sync_page_power(&a);
@@ -571,6 +577,12 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                     a.borrow_mut().core.toggle();
                 }
             }
+            WM_HOTKEY if matches!(w.0 as i32, HOTKEY_SNIP | HOTKEY_SNIP_ALT) => {
+                if let Some(a) = app() {
+                    a.borrow_mut().snip.arm();
+                }
+                pin::launch_snip();
+            }
             bus::WM_BUS => {
                 if let Some(a) = app() {
                     drain_bus(&a);
@@ -633,6 +645,9 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                 return LRESULT(0);
             }
             WM_DESTROY => {
+                let _ = UnregisterHotKey(Some(h), HOTKEY_SNIP);
+                let _ = UnregisterHotKey(Some(h), HOTKEY_SNIP_ALT);
+                pin::close_all();
                 tray::remove(h);
                 PostQuitMessage(0);
             }
@@ -660,6 +675,11 @@ pub fn menu(h: HWND) {
         tray::ID_RESET => a.borrow_mut().core.reset_position(),
         tray::ID_STARTUP => startup::set_start_with_windows(!state.startup.unwrap_or(false)),
         tray::ID_SETTINGS => prefs::open(None),
+        tray::ID_SNIP => {
+            a.borrow_mut().snip.arm();
+            pin::launch_snip();
+            return;
+        }
         tray::ID_TOGGLE => (a.borrow().core.send)("toggle", Value::Null),
         tray::ID_QUIT => unsafe {
             let _ = DestroyWindow(h);
@@ -736,8 +756,12 @@ pub fn features_changed(a: &Rc<RefCell<App>>, before: &Value) {
     if now["asrHanafi"] != before["asrHanafi"] || now["hijriAdjust"] != before["hijriAdjust"] {
         s.prayer.refresh();
     }
-    if now["clipboardHistory"] == false && before["clipboardHistory"] != false {
-        s.system.clear_clips();
+    if now["clipboardHistory"] != before["clipboardHistory"]
+        || now["clipPersist"] != before["clipPersist"]
+        || now["clipMaxItems"] != before["clipMaxItems"]
+        || now["clipExpireMinutes"] != before["clipExpireMinutes"]
+    {
+        s.system.clip_settings_changed();
     }
     s.network.set_enabled(now["netToasts"] == true);
     s.privacy.set_enabled(now["privacyDots"] == true);
@@ -791,6 +815,9 @@ fn drain_sys(a: &Rc<RefCell<App>>) {
         if data.get("focusapp").is_some() || data.get("running").is_some() {
             continue; // the Apps tab's answers (step 6)
         }
+        if let Some(fg) = data.get("fgProc").and_then(Value::as_str) {
+            a.borrow_mut().snip.on_fg_proc(fg);
+        }
         // the clipboard counter: whatever was there at start is old news
         if let Some(seq) = data.get("clip").and_then(Value::as_f64) {
             let seq = seq as u64;
@@ -798,11 +825,21 @@ fn drain_sys(a: &Rc<RefCell<App>>) {
             let prev = s.clip_seq.replace(seq);
             if prev.is_some_and(|p| p != seq) {
                 let private = data.get("clipPriv").and_then(Value::as_bool).unwrap_or(false);
+                let self_pin_copy = pin::take_ignored_clip_seq(seq as u32);
+                let has_img = !private && !self_pin_copy && nova_sys::clip::has_image();
+                let (snip_hint, drag_hint) = if has_img {
+                    s.snip.consume_on_clip()
+                } else {
+                    (false, None)
+                };
+                if snip_hint {
+                    *s.pending_pin_drag.lock().unwrap() = drag_hint;
+                }
                 let (system, shots) = (s.system.clone(), s.shots.clone());
                 drop(s);
                 system.clipboard_changed(private);
-                if !private {
-                    std::thread::spawn(move || shots.clipboard_changed());
+                if has_img {
+                    std::thread::spawn(move || shots.clipboard_changed(snip_hint));
                 }
             }
         }
@@ -1102,7 +1139,19 @@ fn run() -> Result<(), String> {
     let tasks = nova_services::tasks::Tasks::new(ctx.clone());
     let app_notify = nova_services::appnotify::AppNotify::new(ctx.clone());
     let shots = nova_services::screenshot::Screenshots::new(ctx.clone(), shelf.clone());
-    let app_rc = Rc::new(RefCell::new(App { core: core::Core::new(win, send, Store::new(dir.clone()), features), glass: glass::Glass::new(), env: None, page: None, sys, sys_lines: line_rx, bus, bus_rx, shared_features, system, prayer, network, privacy, apps, shelf, downloads, news, calendar, plugins, shots, updater, app_notify, prefs: None, radio: None, tasks_win: None, tasks, radio_now: serde_json::json!({}), clip_seq: None, clips: clips::ClipsManager::new(dir.clone()), data_dir: dir.clone() }));
+    let pending_pin_drag: Arc<Mutex<Option<RECT>>> = Arc::new(Mutex::new(None));
+    {
+        let bus_pin = bus.clone();
+        let drag_slot = pending_pin_drag.clone();
+        shots.on_pin(move |w, h, px| {
+            let hint = drag_slot.lock().unwrap().take();
+            bus_pin.ui(move |a| {
+                let arabic = a.borrow().core.features.get()["prefsLang"].as_str() == Some("ar");
+                pin::spawn(w, h, px, hint, arabic);
+            });
+        });
+    }
+    let app_rc = Rc::new(RefCell::new(App { core: core::Core::new(win, send, Store::new(dir.clone()), features), glass: glass::Glass::new(), env: None, page: None, sys, sys_lines: line_rx, bus, bus_rx, shared_features, system, prayer, network, privacy, apps, shelf, downloads, news, calendar, plugins, shots, updater, app_notify, prefs: None, radio: None, tasks_win: None, tasks, radio_now: serde_json::json!({}), clip_seq: None, snip: pin::SnipTracker::new(), pending_pin_drag, clips: clips::ClipsManager::new(dir.clone()), data_dir: dir.clone() }));
     APP.with(|a| *a.borrow_mut() = Some(app_rc.clone()));
 
     // HardwareMediaKeyHandling off, like nova.js: the island's own audio (Quran Radio, the adhan)
@@ -1199,6 +1248,12 @@ fn run() -> Result<(), String> {
                 if RegisterHotKey(Some(hwnd), HOTKEY_TOGGLE, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'I' as u32).is_err() {
                     nova_core::log::warn("Ctrl+Alt+I is taken by another app");
                 }
+                // Register PrtScn when Windows Snipping Tool doesn't own it; otherwise SnipTracker
+                // detects Windows' built-in PrtScn / ScreenClippingHost flow automatically.
+                let _ = RegisterHotKey(Some(hwnd), HOTKEY_SNIP, MOD_NOREPEAT, VK_SNAPSHOT.0 as u32);
+                if RegisterHotKey(Some(hwnd), HOTKEY_SNIP_ALT, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT, 'S' as u32).is_err() {
+                    nova_core::log::warn("Ctrl+Alt+S is taken by another app");
+                }
             }
             schedule_cursor(hwnd, 40);
             unsafe {
@@ -1217,6 +1272,23 @@ fn run() -> Result<(), String> {
             // tests: a video in the mini player, as if popped out of a tab
             if let Some(v) = arg("--open-mini") {
                 mini::open(&app_rc, mini::Session { id: v, t: 30.0, app_id: "NovaTest".into(), title: "Mini player test".into() });
+            }
+            // tests: spawn a native 1:1 floating pin overlay of WxH pixels
+            if let Some(spec) = arg("--test-pin") {
+                if let Some((w, h)) = spec.split_once('x').and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?))) {
+                    let mut px = vec![0u8; (w as usize) * (h as usize) * 4];
+                    for y in 0..h as usize {
+                        for x in 0..w as usize {
+                            let o = (y * w as usize + x) * 4;
+                            px[o] = ((x * 255) / (w as usize).max(1)) as u8;
+                            px[o + 1] = ((y * 255) / (h as usize).max(1)) as u8;
+                            px[o + 2] = 90;
+                            px[o + 3] = 255;
+                        }
+                    }
+                    let arabic = app_rc.borrow().core.features.get()["prefsLang"].as_str() == Some("ar");
+                    let _ = pin::spawn(w, h, px, Some(RECT { left: 160, top: 140, right: 160 + w as i32, bottom: 140 + h as i32 }), arabic);
+                }
             }
             let s = app_rc.borrow();
             s.system.start();

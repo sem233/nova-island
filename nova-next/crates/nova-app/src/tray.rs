@@ -17,6 +17,7 @@ pub const ID_STARTUP: u32 = 4;
 pub const ID_TOGGLE: u32 = 5;
 pub const ID_SETTINGS: u32 = 6;
 pub const ID_QUIT: u32 = 7;
+pub const ID_SNIP: u32 = 8;
 
 /// Adds the tray icon (icon file from the embedded app icon), tooltip "Nova Island".
 pub fn add(hwnd: HWND) {
@@ -89,6 +90,7 @@ pub fn popup(_hwnd: HWND, s: &MenuState) -> u32 {
         if let Some(on) = s.startup {
             let _ = AppendMenuW(menu, MF_STRING | check(on), ID_STARTUP as usize, &HSTRING::from("Start with Windows"));
         }
+        let _ = AppendMenuW(menu, MF_STRING, ID_SNIP as usize, &HSTRING::from("Snip & pin\tPrtScn"));
         let _ = AppendMenuW(menu, MF_STRING, ID_TOGGLE as usize, &HSTRING::from("Expand / collapse\tCtrl+Alt+I"));
         let _ = AppendMenuW(menu, MF_STRING, ID_SETTINGS as usize, &HSTRING::from("Settings…"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);

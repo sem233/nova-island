@@ -1,6 +1,6 @@
-//! System status (system.js): CPU / RAM, clipboard history (memory only), weather, and the place
-//! (a city picked in Settings, else the IP location, else the time zone's capital), shared with the
-//! prayer times.
+//! System status (system.js): CPU / RAM, configurable clipboard history (up to 50 items with
+//! optional persistence and auto-expiry), weather, and the place (a city picked in Settings, else
+//! the IP location, else the time zone's capital), shared with the prayer times.
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex};
 
 use nova_core::http;
@@ -8,14 +8,46 @@ use serde_json::{json, Value};
 
 use crate::ctx::{now_ms, Ctx, Wake};
 
-const MAX_CLIPS: usize = 8;
+const MIN_CLIPS: usize = 5;
+const MAX_CLIPS_CAP: usize = 50;
+const DEFAULT_MAX_CLIPS: usize = 50;
 // pinned clips (1.8.3): kept on top and on disk, never pushed out by new copies
 const MAX_PINS: usize = 10;
 const PINS_FILE: &str = "clips-pinned.json";
+const HISTORY_FILE: &str = "clips-history.json";
+const MAX_PERSIST_BYTES: usize = 64 * 1024;
 const WEATHER_FRESH: f64 = 3.0 * 60.0 * 60.0 * 1000.0;
 const DAY: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
 // after a failure: 2, 5, then every 15 minutes
 const RETRY_MIN: [u64; 3] = [2, 5, 15];
+
+#[derive(Clone, Debug, PartialEq)]
+struct ClipEntry {
+    text: String,
+    at: f64,
+}
+
+fn truncate_utf8(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    s[..end].to_string()
+}
+
+fn prune_clips(clips: &mut Vec<ClipEntry>, max_items: usize, expire_ms: Option<f64>, now: f64) -> bool {
+    let before = clips.len();
+    if let Some(exp) = expire_ms {
+        clips.retain(|e| e.at.is_finite() && (now - e.at) < exp);
+    }
+    if clips.len() > max_items {
+        clips.truncate(max_items);
+    }
+    clips.len() != before
+}
 
 /// JS Math.round
 fn round(v: f64) -> f64 {
@@ -23,7 +55,7 @@ fn round(v: f64) -> f64 {
 }
 
 struct State {
-    clips: Vec<String>,
+    clips: Vec<ClipEntry>,
     pins: Vec<String>,
     last_clip: String,
     smart: Option<Value>,
@@ -89,13 +121,77 @@ fn locate() -> Result<Value, String> {
     Err("no location".into())
 }
 
+fn clip_max_from(ctx: &Ctx) -> usize {
+    ctx.feature("clipMaxItems")
+        .as_f64()
+        .filter(|n| n.is_finite())
+        .map(|n| (n.round() as isize).clamp(MIN_CLIPS as isize, MAX_CLIPS_CAP as isize) as usize)
+        .unwrap_or(DEFAULT_MAX_CLIPS)
+}
+
+fn clip_expire_ms_from(ctx: &Ctx) -> Option<f64> {
+    let mins = ctx.feature("clipExpireMinutes").as_f64().filter(|n| n.is_finite()).unwrap_or(60.0);
+    if mins <= 0.0 {
+        None
+    } else {
+        Some(mins.clamp(1.0, 10080.0) * 60_000.0)
+    }
+}
+
+fn clip_persist_from(ctx: &Ctx) -> bool {
+    ctx.on("clipboardHistory") && ctx.on("clipPersist")
+}
+
+fn load_history(store: &nova_core::settings::Store, pins: &[String], max_items: usize, expire_ms: Option<f64>, now: f64) -> (Vec<ClipEntry>, bool) {
+    let Some(raw) = store.load(HISTORY_FILE) else {
+        return (Vec::new(), false);
+    };
+    let Some(arr) = raw.as_array() else {
+        return (Vec::new(), true);
+    };
+    let mut clips = Vec::new();
+    let mut changed = false;
+    for v in arr {
+        let entry = if let Some(o) = v.as_object() {
+            let text = o.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+            let at = o.get("at").and_then(Value::as_f64).filter(|n| n.is_finite()).unwrap_or(now);
+            ClipEntry { text, at }
+        } else if let Some(s) = v.as_str() {
+            changed = true;
+            ClipEntry { text: s.to_string(), at: now }
+        } else {
+            changed = true;
+            continue;
+        };
+        if entry.text.trim_matches(crate::smartclip::js_space).is_empty()
+            || pins.contains(&entry.text)
+            || clips.iter().any(|c: &ClipEntry| c.text == entry.text)
+        {
+            changed = true;
+            continue;
+        }
+        clips.push(entry);
+    }
+    clips.sort_by(|a, b| b.at.total_cmp(&a.at));
+    if prune_clips(&mut clips, max_items, expire_ms, now) {
+        changed = true;
+    }
+    (clips, changed)
+}
+
 impl System {
     pub fn new(ctx: Ctx) -> Arc<System> {
         let store = ctx.store();
-        let weather = store.load("weather-cache.json").filter(|s| now_ms() - s["at"].as_f64().unwrap_or(0.0) < WEATHER_FRESH).map(|s| s["weather"].clone());
-        let pins = store.load(PINS_FILE).and_then(|v| v.as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).take(MAX_PINS).collect())).unwrap_or_default();
+        let now = now_ms();
+        let weather = store.load("weather-cache.json").filter(|s| now - s["at"].as_f64().unwrap_or(0.0) < WEATHER_FRESH).map(|s| s["weather"].clone());
+        let pins: Vec<String> = store.load(PINS_FILE).and_then(|v| v.as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).take(MAX_PINS).collect())).unwrap_or_default();
+        let (clips, history_changed) = if clip_persist_from(&ctx) {
+            load_history(&store, &pins, clip_max_from(&ctx), clip_expire_ms_from(&ctx), now)
+        } else {
+            (Vec::new(), false)
+        };
         let st = State {
-            clips: Vec::new(),
+            clips,
             pins,
             last_clip: nova_sys::clip::read_text(),
             smart: None,
@@ -105,7 +201,12 @@ impl System {
             located_at: 0.0,
             weather_fails: 0,
         };
-        Arc::new(System { ctx, st: Mutex::new(st), stats_every: AtomicU64::new(2000), weather_wake: Wake::new(), stats_wake: Wake::new(), on_location: Mutex::new(Vec::new()) })
+        let sys = Arc::new(System { ctx, st: Mutex::new(st), stats_every: AtomicU64::new(2000), weather_wake: Wake::new(), stats_wake: Wake::new(), on_location: Mutex::new(Vec::new()) });
+        if history_changed {
+            let clips_copy = sys.st.lock().unwrap().clips.clone();
+            sys.persist_history(&clips_copy);
+        }
+        sys
     }
 
     pub fn start(self: &Arc<Self>) {
@@ -138,6 +239,14 @@ impl System {
             let (total, free) = nova_sys::sysinfo::memory();
             let used = total - free;
             self.ctx.send("stats", json!({ "cpu": cpu, "ram": used / total, "ramUsed": used, "ramTotal": total, "rx": rx, "tx": tx, "ping": if ping < 0 { Value::Null } else { json!(ping) } }));
+            // O(1) oldest-clip expiry check — zero extra threads or timers
+            if let Some(exp) = clip_expire_ms_from(&self.ctx) {
+                let now_ts = now_ms();
+                let expired = self.st.lock().unwrap().clips.last().is_some_and(|e| now_ts - e.at >= exp);
+                if expired {
+                    self.prune_expired_at(now_ts);
+                }
+            }
         }
     }
 
@@ -148,13 +257,75 @@ impl System {
         }
     }
 
-    // ---- clipboard (kept in memory only; may contain sensitive text) ----
+    // ---- clipboard (configurable count up to 50 + expiry + optional disk persistence) ----
+    fn persist_history(&self, clips: &[ClipEntry]) {
+        if clip_persist_from(&self.ctx) {
+            let saved: Vec<Value> = clips
+                .iter()
+                .map(|e| json!({ "text": truncate_utf8(&e.text, MAX_PERSIST_BYTES), "at": e.at }))
+                .collect();
+            let _ = self.ctx.store().save(HISTORY_FILE, &Value::Array(saved));
+        } else {
+            let _ = std::fs::remove_file(self.ctx.dir.join(HISTORY_FILE));
+        }
+    }
+
+    fn prune_expired_at(&self, now: f64) -> bool {
+        let max_items = clip_max_from(&self.ctx);
+        let expire_ms = clip_expire_ms_from(&self.ctx);
+        let mut st = self.st.lock().unwrap();
+        if !prune_clips(&mut st.clips, max_items, expire_ms, now) {
+            return false;
+        }
+        let clips_copy = st.clips.clone();
+        let list = Self::listing(&st);
+        drop(st);
+        self.persist_history(&clips_copy);
+        self.ctx.send("clipboard", list);
+        true
+    }
+
+    /// Applies updated clipboard history settings (enable/disable, persistence, limit, expiry) immediately.
+    pub fn clip_settings_changed(&self) {
+        let now = now_ms();
+        if !self.ctx.on("clipboardHistory") {
+            let mut st = self.st.lock().unwrap();
+            let had = !st.clips.is_empty();
+            st.clips.clear();
+            let list = Self::listing(&st);
+            drop(st);
+            let _ = std::fs::remove_file(self.ctx.dir.join(HISTORY_FILE));
+            if had {
+                self.ctx.send("clipboard", list);
+            }
+            return;
+        }
+        let max_items = clip_max_from(&self.ctx);
+        let expire_ms = clip_expire_ms_from(&self.ctx);
+        let mut st = self.st.lock().unwrap();
+        let changed = prune_clips(&mut st.clips, max_items, expire_ms, now);
+        let clips_copy = st.clips.clone();
+        let list = Self::listing(&st);
+        drop(st);
+        self.persist_history(&clips_copy);
+        if changed {
+            self.ctx.send("clipboard", list);
+        }
+    }
+
     /// A new copy (the bridge's clipboard counter moved). Private copies are never read.
     pub fn clipboard_changed(&self, is_private: bool) {
         if is_private {
             return;
         }
         let text = nova_sys::clip::read_text();
+        self.record_clip_at(text, now_ms());
+    }
+
+    /// Records `text` into smart clipboard & history at timestamp `now` (ms since epoch).
+    pub fn record_clip_at(&self, text: String, now: f64) {
+        let max_items = clip_max_from(&self.ctx);
+        let expire_ms = clip_expire_ms_from(&self.ctx);
         let mut st = self.st.lock().unwrap();
         if text.is_empty() || text == st.last_clip {
             return;
@@ -175,17 +346,19 @@ impl System {
         if st.pins.contains(&text) {
             return; // already on top, pinned
         }
-        st.clips.retain(|c| *c != text);
-        st.clips.insert(0, text);
-        st.clips.truncate(MAX_CLIPS);
+        st.clips.retain(|c| c.text != text);
+        st.clips.insert(0, ClipEntry { text, at: now });
+        prune_clips(&mut st.clips, max_items, expire_ms, now);
+        let clips_copy = st.clips.clone();
         let list = Self::listing(&st);
         drop(st);
+        self.persist_history(&clips_copy);
         self.ctx.send("clipboard", list);
     }
 
     /// The list the page shows: the pinned clips first, then the recent ones.
     fn entries(st: &State) -> Vec<(String, bool)> {
-        st.pins.iter().map(|p| (p.clone(), true)).chain(st.clips.iter().filter(|c| !st.pins.contains(c)).map(|c| (c.clone(), false))).collect()
+        st.pins.iter().map(|p| (p.clone(), true)).chain(st.clips.iter().filter(|c| !st.pins.contains(&c.text)).map(|c| (c.text.clone(), false))).collect()
     }
 
     /// Each clip as the page gets it: the first 300 characters (UTF-16 units, as c.slice(0, 300)),
@@ -206,29 +379,36 @@ impl System {
 
     /// The whole text of clip `i` (the full view).
     pub fn clip_full(&self, i: usize) -> Value {
+        self.prune_expired_at(now_ms());
         let st = self.st.lock().unwrap();
         Self::entries(&st).get(i).map(|(c, _)| Value::String(c.clone())).unwrap_or(Value::Null)
     }
 
     /// Pins or unpins clip `i`. Pins are saved on this PC (the user chose to keep them).
     pub fn pin_clip(&self, i: usize, on: bool) {
+        let now = now_ms();
+        let max_items = clip_max_from(&self.ctx);
+        let expire_ms = clip_expire_ms_from(&self.ctx);
         let mut st = self.st.lock().unwrap();
+        prune_clips(&mut st.clips, max_items, expire_ms, now);
         let Some((text, pinned)) = Self::entries(&st).get(i).cloned() else { return };
         if on && !pinned {
             st.pins.insert(0, text.clone());
             st.pins.truncate(MAX_PINS);
-            st.clips.retain(|c| *c != text);
+            st.clips.retain(|c| c.text != text);
         } else if !on && pinned {
             st.pins.retain(|c| *c != text);
-            st.clips.retain(|c| *c != text);
-            st.clips.insert(0, text);
-            st.clips.truncate(MAX_CLIPS);
+            st.clips.retain(|c| c.text != text);
+            st.clips.insert(0, ClipEntry { text, at: now });
+            prune_clips(&mut st.clips, max_items, expire_ms, now);
         } else {
             return;
         }
         let _ = self.ctx.store().save(PINS_FILE, &json!(st.pins));
+        let clips_copy = st.clips.clone();
         let list = Self::listing(&st);
         drop(st);
+        self.persist_history(&clips_copy);
         self.ctx.send("clipboard", list);
     }
 
@@ -244,16 +424,23 @@ impl System {
     }
 
     pub fn copy_clip(&self, i: usize) {
+        let now = now_ms();
+        let max_items = clip_max_from(&self.ctx);
+        let expire_ms = clip_expire_ms_from(&self.ctx);
         let mut st = self.st.lock().unwrap();
+        prune_clips(&mut st.clips, max_items, expire_ms, now);
         let Some((text, pinned)) = Self::entries(&st).get(i).cloned() else { return };
         st.last_clip = text.clone();
         nova_sys::clip::write_text(&text);
         if !pinned {
-            st.clips.retain(|c| *c != text);
-            st.clips.insert(0, text);
+            st.clips.retain(|c| c.text != text);
+            st.clips.insert(0, ClipEntry { text, at: now });
+            prune_clips(&mut st.clips, max_items, expire_ms, now);
         }
+        let clips_copy = st.clips.clone();
         let list = Self::listing(&st);
         drop(st);
+        self.persist_history(&clips_copy);
         self.ctx.send("clipboard", list);
     }
 
@@ -261,12 +448,15 @@ impl System {
     pub fn clear_clips(&self) {
         let mut st = self.st.lock().unwrap();
         st.clips.clear();
+        let clips_copy = st.clips.clone();
         let list = Self::listing(&st);
         drop(st);
+        self.persist_history(&clips_copy);
         self.ctx.send("clipboard", list);
     }
 
     pub fn snapshot(&self) -> Value {
+        self.prune_expired_at(now_ms());
         let st = self.st.lock().unwrap();
         json!({ "clips": Self::listing(&st), "weather": st.weather.clone().unwrap_or(Value::Null) })
     }
@@ -415,6 +605,149 @@ impl System {
                 }
             };
             self.weather_wake.sleep(wait);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("nova-sys-clip-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let _ = std::fs::create_dir_all(&d);
+        d
+    }
+
+    fn make_ctx(dir: PathBuf, feats: Value) -> (Ctx, Arc<Mutex<Vec<(String, Value)>>>) {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let log2 = log.clone();
+        let emit: crate::ctx::Emit = Arc::new(move |ch, v| {
+            log2.lock().unwrap().push((ch.to_string(), v));
+        });
+        let ctx = Ctx { emit, dir, features: Arc::new(Mutex::new(feats)) };
+        (ctx, log)
+    }
+
+    #[test]
+    fn stores_up_to_50_items_and_shrinks_live() {
+        let dir = test_dir("limit50");
+        let (ctx, _) = make_ctx(dir.clone(), json!({
+            "clipboardHistory": true,
+            "clipPersist": true,
+            "clipMaxItems": 50,
+            "clipExpireMinutes": 0,
+            "smartClipboard": false,
+        }));
+        let sys = System::new(ctx.clone());
+        let base = now_ms();
+        for i in 1..=60 {
+            sys.record_clip_at(format!("msg-{i}"), base + i as f64 * 100.0);
+        }
+        let snap = sys.snapshot();
+        let clips = snap["clips"].as_array().unwrap();
+        assert_eq!(clips.len(), 50);
+        assert_eq!(clips[0]["text"], "msg-60");
+        assert_eq!(clips[49]["text"], "msg-11");
+
+        // Shrink limit live to 15
+        ctx.features.lock().unwrap()["clipMaxItems"] = json!(15);
+        sys.clip_settings_changed();
+        let clips2 = sys.snapshot()["clips"].as_array().unwrap().clone();
+        assert_eq!(clips2.len(), 15);
+        assert_eq!(clips2[0]["text"], "msg-60");
+        assert_eq!(clips2[14]["text"], "msg-46");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn expires_old_items_and_keeps_pins_and_never_mode() {
+        let dir = test_dir("expire");
+        let (ctx, _) = make_ctx(dir.clone(), json!({
+            "clipboardHistory": true,
+            "clipPersist": true,
+            "clipMaxItems": 50,
+            "clipExpireMinutes": 15,
+            "smartClipboard": false,
+        }));
+        let sys = System::new(ctx.clone());
+        let t0 = now_ms();
+        // Insert an item 20 min ago, another 5 min ago, and pin an old item
+        sys.record_clip_at("pinned-old".into(), t0 - 30.0 * 60_000.0);
+        // Pin directly via state so timestamp is old
+        {
+            let mut st = sys.st.lock().unwrap();
+            st.pins.push("pinned-old".into());
+            st.clips.clear();
+            st.clips.push(ClipEntry { text: "fresh".into(), at: t0 - 5.0 * 60_000.0 });
+            st.clips.push(ClipEntry { text: "expired".into(), at: t0 - 20.0 * 60_000.0 });
+        }
+        assert!(sys.prune_expired_at(t0));
+        let clips = sys.snapshot()["clips"].as_array().unwrap().clone();
+        assert_eq!(clips.len(), 2);
+        assert_eq!(clips[0]["text"], "pinned-old");
+        assert_eq!(clips[0]["pinned"], true);
+        assert_eq!(clips[1]["text"], "fresh");
+        assert_eq!(clips[1]["pinned"], false);
+
+        // Mode 0 (Never) must never drop old items
+        ctx.features.lock().unwrap()["clipExpireMinutes"] = json!(0);
+        {
+            let mut st = sys.st.lock().unwrap();
+            st.clips.push(ClipEntry { text: "ancient".into(), at: t0 - 30.0 * DAY });
+        }
+        assert!(!sys.prune_expired_at(t0));
+        let clips_never = sys.snapshot()["clips"].as_array().unwrap().clone();
+        assert_eq!(clips_never.len(), 3);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn persists_across_restart_and_deletes_when_disabled() {
+        let dir = test_dir("persist");
+        let feats = json!({
+            "clipboardHistory": true,
+            "clipPersist": true,
+            "clipMaxItems": 25,
+            "clipExpireMinutes": 60,
+            "smartClipboard": false,
+        });
+        let (ctx1, _) = make_ctx(dir.clone(), feats.clone());
+        let sys1 = System::new(ctx1);
+        let now = now_ms();
+        sys1.record_clip_at("أول رسالة عربية".into(), now - 10_000.0);
+        sys1.record_clip_at("second clip".into(), now - 5_000.0);
+        assert!(dir.join(HISTORY_FILE).exists());
+
+        // Inject an expired item into the saved file to verify load-time pruning
+        let mut raw: Vec<Value> = serde_json::from_str(&std::fs::read_to_string(dir.join(HISTORY_FILE)).unwrap()).unwrap();
+        raw.push(json!({ "text": "too-old", "at": now - 120.0 * 60_000.0 }));
+        std::fs::write(dir.join(HISTORY_FILE), serde_json::to_string(&raw).unwrap()).unwrap();
+
+        // Reload in a fresh System instance
+        let (ctx2, _) = make_ctx(dir.clone(), feats);
+        let sys2 = System::new(ctx2.clone());
+        let clips = sys2.snapshot()["clips"].as_array().unwrap().clone();
+        assert_eq!(clips.len(), 2);
+        assert_eq!(clips[0]["text"], "second clip");
+        assert_eq!(clips[1]["text"], "أول رسالة عربية");
+
+        // Turning off clipPersist must remove clips-history.json immediately
+        ctx2.features.lock().unwrap()["clipPersist"] = json!(false);
+        sys2.clip_settings_changed();
+        assert!(!dir.join(HISTORY_FILE).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn truncate_utf8_preserves_arabic_boundaries() {
+        let s = "مرحبا بالعالم 🚀";
+        for n in 0..=s.len() + 2 {
+            let t = truncate_utf8(s, n);
+            assert!(t.len() <= n);
+            assert!(s.starts_with(&t));
         }
     }
 }

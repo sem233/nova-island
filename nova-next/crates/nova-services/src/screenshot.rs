@@ -30,23 +30,69 @@ fn pictures() -> PathBuf {
     }
 }
 
+type PinCb = Arc<dyn Fn(u32, u32, Vec<u8>) + Send + Sync>;
+
 pub struct Screenshots {
     ctx: Ctx,
     shelf: Arc<Shelf>,
     last: Mutex<Option<(u32, u32, Vec<u8>)>>,
+    on_pin: Mutex<Option<PinCb>>,
 }
 
 impl Screenshots {
     pub fn new(ctx: Ctx, shelf: Arc<Shelf>) -> Arc<Screenshots> {
-        Arc::new(Screenshots { ctx, shelf, last: Mutex::new(None) })
+        Arc::new(Screenshots { ctx, shelf, last: Mutex::new(None), on_pin: Mutex::new(None) })
     }
 
-    /// After a clipboard change (not a private one).
-    pub fn clipboard_changed(self: &Arc<Self>) {
-        if !self.ctx.on("screenshotToast") {
+    /// Registers the callback that spawns a native 1:1 floating pin overlay for a captured screenshot.
+    pub fn on_pin(&self, f: impl Fn(u32, u32, Vec<u8>) + Send + Sync + 'static) {
+        *self.on_pin.lock().unwrap() = Some(Arc::new(f));
+    }
+
+    /// Most recently observed clipboard image as top-down 32-bit BGRA.
+    pub fn last_image(&self) -> Option<(u32, u32, Vec<u8>)> {
+        self.last.lock().unwrap().clone()
+    }
+
+    /// Fast, non-blocking check for a freshly saved Windows Snipping Tool capture in Pictures\Screenshots.
+    fn has_recent_windows_snip(now: f64) -> bool {
+        let dir = pictures().join("Screenshots");
+        std::fs::read_dir(&dir).ok().is_some_and(|r| {
+            r.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| matches!(x.to_string_lossy().to_lowercase().as_str(), "png" | "jpg" | "jpeg")))
+                .filter_map(|p| std::fs::metadata(&p).ok())
+                .any(|m| {
+                    m.len() > 0
+                        && m.modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .is_some_and(|d| {
+                                let t = d.as_millis() as f64;
+                                t >= now - 3500.0 && t <= now + 5000.0
+                            })
+                })
+        })
+    }
+
+    /// After a clipboard change (not a private one). `snip_hint` is true when PrtScn, Win+Shift+S,
+    /// Snipping Tool, or Nova's snip trigger was active.
+    pub fn clipboard_changed(self: &Arc<Self>, snip_hint: bool) {
+        let want_toast = self.ctx.on("screenshotToast");
+        let want_pin = self.ctx.on("shotPinOverlay");
+        if !want_toast && !want_pin {
             return;
         }
         let Some((w, h, px)) = nova_sys::clip::read_image() else { return };
+        if want_pin && (snip_hint || Self::has_recent_windows_snip(now_ms())) {
+            if let Some(cb) = self.on_pin.lock().unwrap().clone() {
+                cb(w, h, px.clone());
+            }
+        }
+        if !want_toast {
+            *self.last.lock().unwrap() = Some((w, h, px));
+            return;
+        }
         let thumb = nova_sys::icons::bgra_png(w, h, &px, Some(72)).map(|b| format!("data:image/png;base64,{}", nova_sys::media::base64(&b))).unwrap_or_default();
         *self.last.lock().unwrap() = Some((w, h, px));
         let auto = self.ctx.on("shotAutoShelf") && self.ctx.on("tabShelf");

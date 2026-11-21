@@ -62,6 +62,12 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.14
+
+**Region Screenshot & Native 1:1 Floating Pin Overlay (`PrtScn` / `Ctrl+Alt+S`)** — captures taken through Windows' built-in Snipping overlay (`PrtScn`, `Win+Shift+S`, `Ctrl+Alt+S`, or tray **Snip & pin**) immediately stay on screen in a crisp, frameless native Win32 floating window at their exact `1:1` captured pixel size, pinned Always-on-Top above other apps without opening any editor or WebView (`0%` idle CPU). Drag anywhere to move; hover to toggle Always-on-Top or close; press `Esc` / double-click / middle-click to dismiss; right-click for Always-on-Top, Copy image, Save as PNG, or Close all. Toggleable under **Settings › Alerts & Privacy › Pin screenshots on screen**.
+
+**Configurable Clipboard History (up to 50 items & auto-expiry)** — expanded the System tab clipboard history from 8 to up to **50** items with full Settings controls under **Settings › Alerts & Privacy › Clipboard history**: choose **History limit** (`5`–`50` items), **Auto-clear after** (`Never`, `5 min`–`7 days`), and **Save history on this PC** (persists non-pinned history safely across restarts while password-manager private copies remain excluded, and deletes the saved file immediately if turned off). Expiry runs O(1) inside the existing stats tick with zero extra background threads or timers.
+
 ## What's new in 1.8.13
 
 **Lower idle CPU & RAM across every theme** — stops invisible slide blur filters and off-screen progress bar layout animations while the island is resting or collapsed as a thin line, converts the system pollers (`nova-sys` foreground snapshot, `vlc` `IsWindow` fast-path + scan backoff, zero-alloc recorder detection, popup-resistant `BrowserTracker`), and moves `renderer.js`, Prayer, Reminders, Companion, Tasks, System, NetSpeed, and Nova eyes onto demand-driven timers and guarded DOM writes (eliminating ~99% of idle `Layout` passes and cutting idle CPU ~3.2× on glass and ~45% on solid themes).

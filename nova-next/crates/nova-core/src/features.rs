@@ -57,8 +57,12 @@ pub fn defaults() -> Map<String, Value> {
         ("clock24", json!(false)),     // times in 24 hours on the island and the widgets (1.8; off: 12 hours)
         // System tab
         ("clipboardHistory", json!(true)),
+        ("clipPersist", json!(true)),       // save clipboard history to disk until it expires
+        ("clipMaxItems", json!(50)),        // max unpinned clipboard history items (5..=50)
+        ("clipExpireMinutes", json!(60)),   // auto-clear clipboard history after N minutes (0 = never)
         // copied image / screenshot -> toast; on the Shelf by itself for a while, or "Add to Shelf"
         ("screenshotToast", json!(true)),
+        ("shotPinOverlay", json!(true)),    // float captured region screenshots on screen at 1:1 size
         ("shotAutoShelf", json!(true)),
         ("shotShelfMinutes", json!(20)),
         // mic / camera in use
@@ -115,6 +119,8 @@ fn range(key: &str) -> Option<(f64, f64)> {
         "waterEvery" => (15.0, 240.0),
         "waterGoal" => (4.0, 16.0),
         "shotShelfMinutes" => (5.0, 1440.0),
+        "clipMaxItems" => (5.0, 50.0),
+        "clipExpireMinutes" => (0.0, 10080.0),
         "batterySaverAt" => (10.0, 100.0),
         _ => return None,
     })

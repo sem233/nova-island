@@ -67,3 +67,29 @@ pub fn pick(owner: Option<HWND>, title: &str, folder: bool, filter: Option<(&str
         s
     }
 }
+
+/// The Save dialog for a single file (e.g. PNG screenshot).
+pub fn save_file(owner: Option<HWND>, title: &str, default_name: &str, filter: (&str, &str), default_ext: &str) -> Option<String> {
+    use windows::Win32::{
+        System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER},
+        UI::Shell::{Common::COMDLG_FILTERSPEC, FileSaveDialog, IFileSaveDialog, FOS_FORCEFILESYSTEM, FOS_OVERWRITEPROMPT, SIGDN_FILESYSPATH},
+    };
+    unsafe {
+        let d: IFileSaveDialog = CoCreateInstance(&FileSaveDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let _ = d.SetTitle(&HSTRING::from(title));
+        let _ = d.SetFileName(&HSTRING::from(default_name));
+        let _ = d.SetDefaultExtension(&HSTRING::from(default_ext));
+        let opts = d.GetOptions().ok()? | FOS_FORCEFILESYSTEM | FOS_OVERWRITEPROMPT;
+        let _ = d.SetOptions(opts);
+        let name = HSTRING::from(filter.0);
+        let spec = HSTRING::from(filter.1);
+        let f = [COMDLG_FILTERSPEC { pszName: windows::core::PCWSTR(name.as_ptr()), pszSpec: windows::core::PCWSTR(spec.as_ptr()) }];
+        let _ = d.SetFileTypes(&f);
+        d.Show(owner).ok()?;
+        let item = d.GetResult().ok()?;
+        let p = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let s = p.to_string().ok();
+        windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as _));
+        s
+    }
+}

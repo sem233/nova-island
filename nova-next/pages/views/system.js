@@ -79,6 +79,14 @@
   // a long or many-line clip whole, to read, copy or pin. Click a line to copy it, as in 1.7.
   const clipList = $('#clip-list');
   const clipCard = clipList.closest('.clips');
+  const clipHeadLabel = clipCard.querySelector('.clips-head > span');
+  let clipCountEl = null;
+  if (clipHeadLabel) {
+    clipCountEl = document.createElement('span');
+    clipCountEl.className = 'clip-count';
+    clipCountEl.style.cssText = 'opacity:.65;font-variant-numeric:tabular-nums;margin-inline-start:4px;';
+    clipHeadLabel.append(clipCountEl);
+  }
   const ICON_PIN = '<svg class="s" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>';
   const ICON_OPEN = '<svg class="s" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
   const ICON_BACK = '<svg class="s" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></svg>';
@@ -121,6 +129,7 @@
 
   function renderClips(clips) {
     clipsNow = (clips || []).map(asClip);
+    if (clipCountEl) clipCountEl.textContent = clipsNow.length ? `· ${clipsNow.length}` : '';
     if (!full.hidden) closeFull();
     clipList.innerHTML = '';
     if (!clipsNow.length) {
