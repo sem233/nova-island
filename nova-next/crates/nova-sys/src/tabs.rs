@@ -64,9 +64,8 @@ impl Tabs {
                         std::thread::sleep(Duration::from_secs(1));
                         continue;
                     }
-                    let fg = crate::win::foreground();
-                    let (proc, _) = crate::win::foreground_info();
-                    let j = tabs.json(fg, &proc, crate::win::is_fullscreen());
+                    let fg = crate::win::foreground_snapshot();
+                    let j = tabs.json(fg.hwnd, &fg.proc_name, fg.fullscreen);
                     *out.lock().unwrap() = j;
                     std::thread::sleep(Duration::from_secs(1));
                 }

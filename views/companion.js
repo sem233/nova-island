@@ -78,16 +78,29 @@
   }
 
   // cards wait while the island is open, hidden, showing another card or a toast
+  let flushTimer = null;
+  function scheduleFlush() {
+    if (flushTimer || !pending) return;
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flush();
+    }, 1000);
+  }
   function queue(card) { pending = card; flush(); }
   function flush() {
     if (!pending) return;
     const now = Date.now();
-    if (!state.visible || lastMode === 'expanded' || cardShowing() || window.sceneShowing?.() || (state.toast && now < state.toastUntil)) return;
+    if (!state.visible || lastMode === 'expanded' || cardShowing() || window.sceneShowing?.() || (state.toast && now < state.toastUntil)) {
+      scheduleFlush();
+      return;
+    }
+    clearTimeout(flushTimer);
+    flushTimer = null;
     const c = pending;
     pending = null;
     showCard(c);
   }
-  setInterval(flush, 1000);
+  window.addEventListener('island:mode', flush);
 
   bridge.onMedia((m) => {
     if (typeof m.idle !== 'number') return;

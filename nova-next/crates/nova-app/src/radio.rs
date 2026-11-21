@@ -41,8 +41,14 @@ fn to_window(a: &Rc<RefCell<App>>, state: Value) {
 
 /// The island's radio changed (station, surah, playing).
 pub fn now(a: &Rc<RefCell<App>>, v: Value) {
+    let playing = v["playing"] == true;
     a.borrow_mut().radio_now = v.clone();
     to_window(a, json!({ "now": v }));
+    if playing {
+        crate::ensure_page_awake(a);
+    } else {
+        crate::maybe_schedule_suspend(a);
+    }
 }
 
 /// The plugin was switched on / off, removed or updated.
@@ -58,6 +64,7 @@ pub fn channel(a: &Rc<RefCell<App>>, channel: &str, args: &[Value]) -> Option<Va
         "radio-data" => return Some(data(a)),
         // the island plays it
         "radio-play" => {
+            crate::ensure_page_awake(a);
             let station = arg0["station"].as_str().filter(|s| !s.is_empty() && s.len() <= 80).map(str::to_string);
             let surah = arg0["surah"].as_i64().filter(|n| (1..=114).contains(n));
             let page = a.borrow().page.clone();

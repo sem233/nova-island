@@ -16,7 +16,7 @@ use windows::{
         },
         UI::{
             Input::KeyboardAndMouse::{GetKeyState, GetKeyboardLayout, GetLastInputInfo, LASTINPUTINFO},
-            WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId},
+            WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible},
         },
     },
 };
@@ -51,6 +51,49 @@ pub fn process_name(pid: u32) -> String {
     }
 }
 
+/// One coherent read of the foreground window (hwnd, exe stem, title, keyboard layout, fullscreen)
+/// so nova-sys doesn't repeat OpenProcess / QueryFullProcessImageNameW three times per tick.
+pub struct FgSnapshot {
+    pub hwnd: HWND,
+    pub proc_name: String,
+    pub title: String,
+    pub layout: i64,
+    pub fullscreen: bool,
+}
+
+fn monitor_bounds_match(h: HWND, r: &RECT) -> bool {
+    unsafe {
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mut mi).as_bool() {
+            return false;
+        }
+        let m = mi.rcMonitor;
+        r.left == m.left && r.top == m.top && r.right == m.right && r.bottom == m.bottom
+    }
+}
+
+/// Reads the foreground window once per tick and reuses its PID/handle across fields.
+pub fn foreground_snapshot() -> FgSnapshot {
+    let h = foreground();
+    if h.is_invalid() {
+        return FgSnapshot { hwnd: HWND::default(), proc_name: String::new(), title: String::new(), layout: 0, fullscreen: false };
+    }
+    let mut pid = 0u32;
+    let thread = unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+    let layout = unsafe { (GetKeyboardLayout(thread).0 as usize & 0xffff) as i64 };
+    let proc_name = process_name(pid);
+    let mut buf = [0u16; 512];
+    let n = unsafe { GetWindowTextW(h, &mut buf) };
+    let title = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+
+    let mut fullscreen = false;
+    let mut r = RECT::default();
+    if unsafe { GetWindowRect(h, &mut r) }.is_ok() && monitor_bounds_match(h, &r) {
+        fullscreen = may_hide_island(&class_of(h), &proc_name);
+    }
+    FgSnapshot { hwnd: h, proc_name, title, layout, fullscreen }
+}
+
 /// (process name, window title) of the window in front.
 pub fn foreground_info() -> (String, String) {
     let h = foreground();
@@ -70,23 +113,13 @@ pub fn is_fullscreen() -> bool {
     if h.is_invalid() {
         return false;
     }
-    let mut pid = 0u32;
-    unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
-    if !may_hide_island(&class_of(h), &process_name(pid)) {
+    let mut r = RECT::default();
+    if unsafe { GetWindowRect(h, &mut r) }.is_err() || !monitor_bounds_match(h, &r) {
         return false;
     }
-    unsafe {
-        let mut r = RECT::default();
-        if GetWindowRect(h, &mut r).is_err() {
-            return false;
-        }
-        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-        if !GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST), &mut mi).as_bool() {
-            return false;
-        }
-        let m = mi.rcMonitor;
-        r.left == m.left && r.top == m.top && r.right == m.right && r.bottom == m.bottom
-    }
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+    may_hide_island(&class_of(h), &process_name(pid))
 }
 
 /// Whether a window covering the whole screen counts as "full screen" (Hide in full screen). Not
@@ -221,19 +254,39 @@ pub fn battery() -> (i64, bool) {
     }
 }
 
+fn eq_exe_stem_ignore_ascii_case(wide: &[u16], stem: &[u8]) -> bool {
+    let len = wide.iter().position(|c| *c == 0).unwrap_or(wide.len());
+    let slice = &wide[..len];
+    let slice = if slice.len() >= 4
+        && slice[slice.len() - 4..].iter().zip(b".exe").all(|(&w, &b)| w < 128 && (w as u8).to_ascii_lowercase() == b)
+    {
+        &slice[..slice.len() - 4]
+    } else {
+        slice
+    };
+    slice.len() == stem.len() && slice.iter().zip(stem).all(|(&w, &b)| w < 128 && (w as u8).to_ascii_lowercase() == b)
+}
+
 /// NVIDIA's capture helper, OBS or Streamlabs running (the island then doesn't hide from captures).
 pub fn recorder_running() -> bool {
-    const RECORDERS: &[&str] = &["nvsphelper64", "nvsphelper", "obs64", "obs32", "obs", "streamlabs obs", "streamlabs desktop", "bdcam", "camrecorder"];
+    const RECORDERS: &[&[u8]] = &[
+        b"nvsphelper64",
+        b"nvsphelper",
+        b"obs64",
+        b"obs32",
+        b"obs",
+        b"streamlabs obs",
+        b"streamlabs desktop",
+        b"bdcam",
+        b"camrecorder",
+    ];
     unsafe {
         let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
         let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
         let mut found = false;
         let mut ok = Process32FirstW(snap, &mut e).is_ok();
         while ok {
-            let len = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
-            let name = String::from_utf16_lossy(&e.szExeFile[..len]).to_lowercase();
-            let stem = name.strip_suffix(".exe").unwrap_or(&name);
-            if RECORDERS.contains(&stem) {
+            if RECORDERS.iter().any(|stem| eq_exe_stem_ignore_ascii_case(&e.szExeFile, stem)) {
                 found = true;
                 break;
             }
@@ -244,15 +297,87 @@ pub fn recorder_running() -> bool {
     }
 }
 
+pub fn is_browser_proc(proc: &str) -> bool {
+    const BROWSERS: &[&str] = &["chrome", "msedge", "brave", "opera", "vivaldi", "firefox"];
+    BROWSERS.iter().any(|b| proc.eq_ignore_ascii_case(b))
+}
+
+fn is_main_browser_rect(r: &RECT) -> bool {
+    (r.right - r.left) >= 320 && (r.bottom - r.top) >= 240
+}
+
+fn format_browser_rect(r: &RECT) -> String {
+    format!("{{\"x\":{},\"y\":{},\"w\":{},\"h\":{}}}", r.left, r.top, r.right - r.left, r.bottom - r.top)
+}
+
+fn valid_browser_rect(h: HWND) -> Option<RECT> {
+    if h.is_invalid() {
+        return None;
+    }
+    let visible = unsafe { IsWindow(Some(h)).as_bool() && IsWindowVisible(h).as_bool() && !IsIconic(h).as_bool() };
+    if !visible {
+        return None;
+    }
+    let mut r = RECT::default();
+    if unsafe { GetWindowRect(h, &mut r) }.is_err() || !is_main_browser_rect(&r) {
+        return None;
+    }
+    Some(r)
+}
+
+/// Tracks the foreground browser window so browser popups/menus don't flap "browser line: on/off".
+pub struct BrowserTracker {
+    hwnd: HWND,
+    rect: Option<RECT>,
+    cached: String,
+}
+
+impl BrowserTracker {
+    pub fn new() -> Self {
+        Self { hwnd: HWND::default(), rect: None, cached: String::from("null") }
+    }
+
+    pub fn json(&mut self, fg: HWND, proc: &str, fullscreen: bool) -> &str {
+        if fullscreen || !is_browser_proc(proc) {
+            self.clear();
+            return "null";
+        }
+        if let Some(r) = valid_browser_rect(fg) {
+            if self.hwnd != fg || self.rect.is_none_or(|prev| prev != r) {
+                self.hwnd = fg;
+                self.rect = Some(r);
+                self.cached = format_browser_rect(&r);
+            }
+            return &self.cached;
+        }
+        // Small browser popup/dropdown (w < 320 or h < 240): keep reporting the parent browser rect while open.
+        if let Some(r) = valid_browser_rect(self.hwnd) {
+            if self.rect.is_none_or(|prev| prev != r) {
+                self.rect = Some(r);
+                self.cached = format_browser_rect(&r);
+            }
+            return &self.cached;
+        }
+        self.clear();
+        "null"
+    }
+
+    fn clear(&mut self) {
+        self.hwnd = HWND::default();
+        self.rect = None;
+        if self.cached != "null" {
+            self.cached.clear();
+            self.cached.push_str("null");
+        }
+    }
+}
+
 /// The browser window in front, for "Stay in place": {"x","y","w","h"} or "null".
 pub fn browser_json(proc: &str, fullscreen: bool) -> String {
-    const BROWSERS: &[&str] = &["chrome", "msedge", "brave", "opera", "vivaldi", "firefox"];
-    let h = foreground();
-    let mut r = RECT::default();
-    if fullscreen || h.is_invalid() || !BROWSERS.contains(&proc.to_lowercase().as_str()) || unsafe { GetWindowRect(h, &mut r) }.is_err() {
+    if fullscreen || !is_browser_proc(proc) {
         return "null".into();
     }
-    format!("{{\"x\":{},\"y\":{},\"w\":{},\"h\":{}}}", r.left, r.top, r.right - r.left, r.bottom - r.top)
+    valid_browser_rect(foreground()).map_or_else(|| "null".into(), |r| format_browser_rect(&r))
 }
 
 #[cfg(test)]
@@ -274,5 +399,27 @@ mod fullscreen_tests {
         assert!(may_hide_island("WinUIDesktopWin32WindowClass", "Photos"), "a photo in full screen");
         assert!(may_hide_island("Chrome_WidgetWin_1", "chrome"), "a video in full screen");
         assert!(may_hide_island("UnityWndClass", "game"), "a game");
+    }
+}
+
+#[cfg(test)]
+mod perf_tests {
+    use super::{eq_exe_stem_ignore_ascii_case, is_browser_proc, is_main_browser_rect};
+    use windows::Win32::Foundation::RECT;
+
+    #[test]
+    fn recorder_match_without_allocating() {
+        let obs: Vec<u16> = "OBS64.EXE\0".encode_utf16().collect();
+        assert!(eq_exe_stem_ignore_ascii_case(&obs, b"obs64"));
+        let chrome: Vec<u16> = "chrome.exe\0".encode_utf16().collect();
+        assert!(!eq_exe_stem_ignore_ascii_case(&chrome, b"obs64"));
+    }
+
+    #[test]
+    fn browser_rect_filters_tiny_popups() {
+        assert!(is_browser_proc("Chrome"));
+        assert!(!is_browser_proc("explorer"));
+        assert!(!is_main_browser_rect(&RECT { left: 10, top: 10, right: 200, bottom: 90 }));
+        assert!(is_main_browser_rect(&RECT { left: 0, top: 0, right: 1200, bottom: 800 }));
     }
 }

@@ -12,17 +12,20 @@ use windows::{
         Foundation::{HWND, LPARAM, WPARAM},
         Media::Audio::{eMultimedia, eRender, AudioSessionStateActive, Endpoints::IAudioMeterInformation, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator},
         System::Com::{CoCreateInstance, CLSCTX_ALL},
-        UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, GetWindowThreadProcessId, PostMessageW, WM_APPCOMMAND},
+        UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindow, PostMessageW, WM_APPCOMMAND},
     },
 };
 
 const SUFFIX: &str = " - VLC media player";
+const IDLE_TITLE: &str = "VLC media player";
+const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 
 pub struct Vlc {
     pub window: HWND,
     pub title: String,
     pid: u32,
     heard_at: Option<Instant>,
+    next_scan: Option<Instant>,
 }
 
 struct Search {
@@ -55,12 +58,30 @@ unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
 
 impl Vlc {
     pub fn new() -> Vlc {
-        Vlc { window: HWND::default(), title: String::new(), pid: 0, heard_at: None }
+        Vlc { window: HWND::default(), title: String::new(), pid: 0, heard_at: None, next_scan: None }
     }
 
     /// Fills window/title; false when VLC isn't running or has nothing open. Hidden windows count:
     /// VLC minimized to the tray hides its main window.
     pub fn find(&mut self) -> bool {
+        if !self.window.is_invalid() && unsafe { IsWindow(Some(self.window)).as_bool() } {
+            let mut buf = [0u16; 512];
+            let n = unsafe { GetWindowTextW(self.window, &mut buf) } as usize;
+            let t = String::from_utf16_lossy(&buf[..n]);
+            if let Some(title) = t.strip_suffix(SUFFIX) {
+                self.title = title.trim().to_string();
+                self.next_scan = None;
+                return !self.title.is_empty();
+            }
+            if t.eq_ignore_ascii_case(IDLE_TITLE) {
+                self.title.clear();
+                return false;
+            }
+        }
+        let now = Instant::now();
+        if self.next_scan.is_some_and(|at| now < at) {
+            return false;
+        }
         let mut s = Search { found: HWND::default(), title: String::new(), pid: self.pid };
         unsafe {
             let _ = EnumWindows(Some(each), LPARAM(&mut s as *mut Search as isize));
@@ -68,6 +89,7 @@ impl Vlc {
         self.pid = s.pid;
         self.window = s.found;
         self.title = s.title;
+        self.next_scan = if self.window.is_invalid() { Some(now + SCAN_INTERVAL) } else { None };
         !self.window.is_invalid() && !self.title.is_empty()
     }
 

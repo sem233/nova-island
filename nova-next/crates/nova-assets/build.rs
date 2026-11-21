@@ -329,9 +329,9 @@ const PATCHES: &[(&str, &str, &str)] = &[
     // island's own rule said the same.
     ("views/nova.js", "  const DWELL_MS = 3000;\n", "  const DWELL_MS = 2000;\n"),
     // ...and when each of the page's own timers is next due, so the sleeping page wakes for it
-    ("views/reminders.js", "  setInterval(tick, 250);\n", "  setInterval(tick, 250);\n  window.reminderNextAt = () => (feat('reminders') ? nextAt : 0);\n"),
+    ("views/reminders.js", "    }, delay);\n  }\n  scheduleTick();\n", "    }, delay);\n  }\n  scheduleTick();\n  window.reminderNextAt = () => (feat('reminders') ? nextAt : 0);\n"),
     ("views/water.js", "  const everyMs = () => (state.features.waterEvery || 60) * 60e3;\n", "  const everyMs = () => (state.features.waterEvery || 60) * 60e3;\n  window.waterDueIn = () => (feat('water') ? everyMs() - activeMs : Infinity);\n"),
-    ("views/companion.js", "  setInterval(flush, 1000);\n", "  setInterval(flush, 1000);\n  window.careDueAt = () => (feat('wellbeing') ? activeSince + WORK_MS : Infinity);\n"),
+    ("views/companion.js", "  window.addEventListener('island:mode', flush);\n", "  window.addEventListener('island:mode', flush);\n  window.careDueAt = () => (feat('wellbeing') ? activeSince + WORK_MS : Infinity);\n"),
     (
         "views/calendar.js",
         "  bridge.onCalendar(update);\n",
@@ -500,6 +500,7 @@ const PATCHES: &[(&str, &str, &str)] = &[
     ("preload.js", r##"  network: () => ipcRenderer.invoke('net-get'),
 "##, r##"  network: () => ipcRenderer.invoke('net-get'),
   onAdhanFile: on('adhan-file'),
+  timerState: (on, remMs) => ipcRenderer.send('timer-state', !!on, Math.max(0, Number(remMs) || 0)),
   calcOpen: (on, blur) => ipcRenderer.send('calc-open', on, blur),
   calcRect: (r) => ipcRenderer.send('calc-rect', r),
   onCalcClose: on('calc-close'),
@@ -521,8 +522,8 @@ const PATCHES: &[(&str, &str, &str)] = &[
     ),
     (
         "renderer.js",
-        "  fadeFrames = 10;\n  wake(300);\n});",
-        "  fadeFrames = 10;\n  wake(300);\n  window.dispatchEvent(new CustomEvent('island:backdrop'));\n});",
+        "  fadeFrames = 4;\n  wake(300);\n});",
+        "  fadeFrames = 4;\n  wake(300);\n  window.dispatchEvent(new CustomEvent('island:backdrop'));\n});",
     ),
     (
         "prefs/index.html",

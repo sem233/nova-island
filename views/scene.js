@@ -15,6 +15,36 @@
   let total = 0;
   let current = null;
   let lastTick = Date.now();
+  let sceneTimer = null;
+  let blinkTimer = null;
+
+  function stopTimers() {
+    clearInterval(sceneTimer);
+    clearTimeout(blinkTimer);
+    sceneTimer = null;
+    blinkTimer = null;
+  }
+
+  function scheduleBlink() {
+    if (blinkTimer || !current) return;
+    blinkTimer = setTimeout(() => {
+      blinkTimer = null;
+      if (!current) return;
+      face.classList.add('blink');
+      setTimeout(() => face.classList.remove('blink'), 130);
+      scheduleBlink();
+    }, 2600 + Math.random() * 3200);
+  }
+
+  function tickScene() {
+    const now = Date.now();
+    const dt = now - lastTick;
+    lastTick = now;
+    if (!current) return;
+    if (state.hover) state.sceneUntil += dt;
+    if (now >= state.sceneUntil) return end();
+    bar.style.width = `${Math.max(0, (state.sceneUntil - now) / total) * 100}%`;
+  }
 
   function classes(on, s) {
     island.classList.toggle('sc-nova', on && s.who !== 'drop');
@@ -25,6 +55,7 @@
   }
 
   function end(how = 'closed') {
+    stopTimers();
     if (!current) return;
     if (how !== 'button') current.onClose?.();
     state.sceneUntil = 0;
@@ -39,6 +70,8 @@
   window.playScene = (s) => {
     if (anchor.vertical) return false; // no room beside a side-docked island
     current = s;
+    lastTick = Date.now();
+    stopTimers();
     classes(true, s);
     card.className = `scene-card ${s.tone || 'gold'}`;
     card.lang = s.lang || 'en';
@@ -58,6 +91,8 @@
     render();
     positionIsland();
     requestAnimationFrame(() => card.classList.add('on'));
+    sceneTimer = setInterval(tickScene, 250);
+    scheduleBlink();
     return true;
   };
   window.sceneShowing = () => !!current;
@@ -71,21 +106,5 @@
     fn?.();
   });
 
-  // countdown (paused while the mouse is on it), and a blink now and then
-  setInterval(() => {
-    const now = Date.now();
-    const dt = now - lastTick;
-    lastTick = now;
-    if (!current) return;
-    if (state.hover) state.sceneUntil += dt;
-    if (now >= state.sceneUntil) return end();
-    bar.style.width = `${Math.max(0, (state.sceneUntil - now) / total) * 100}%`;
-  }, 250);
-  (function blink() {
-    if (current) {
-      face.classList.add('blink');
-      setTimeout(() => face.classList.remove('blink'), 130);
-    }
-    setTimeout(blink, 2600 + Math.random() * 3200);
-  })();
+  // countdown and blink timers start in playScene() and stop in end() so idle scenes cost nothing.
 })();

@@ -90,6 +90,7 @@ pub struct Core {
     pinned: bool,
     calc_open: bool,
     calc_closing: bool,
+    pub timer_active: bool,
     pub calc_rect: Rect,
     pub island_rect: Rect,
     /// The pill at rest (not opened, no notification): what "over a tab" is decided on, so the
@@ -117,7 +118,7 @@ impl Core {
             win, send, store, features, prefs,
             anchor: None, last_layout: String::new(), omni: None, omni_key: String::new(), drag: None, drag_from: None,
             user_hidden: false, fullscreen_hidden: false, tab_rects: Vec::new(), line: false, line_rect: Rect::default(), line_off_since: None, browser_rect: None, ghost: false, ghost_open: false, dimmed: false, clickable: false, pinned: false,
-            calc_open: false, calc_closing: false, calc_rect: Rect::default(),
+            calc_open: false, calc_closing: false, timer_active: false, calc_rect: Rect::default(),
             island_rect: Rect::default(), rest_rect: Rect::default(), pending_rest: None, inside: false, active: false, entered_at: Instant::now(), suppress_until_leave: false,
             near_sent: None, cursor_far: false,
         }

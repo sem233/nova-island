@@ -178,13 +178,24 @@ fn prefs_channel(app: &Rc<RefCell<App>>, channel: &str, args: &[Value], id: Opti
         "widgets-do" => crate::widgets::act(&args.first().cloned().unwrap_or(Value::Null)),
         // Settings' update bar (1.8): what's waiting, and "Update now" (the island counts down,
         // as its own card does, then installs)
-        "update-state" => json!({ "ready": app.borrow().updater.ready_version() }),
+        "update-state" => {
+            let info = app.borrow().updater.ready_info();
+            json!({ "ready": info.as_ref().map(|x| x.0.as_str()), "source": info.as_ref().map(|x| x.1.as_str()) })
+        }
         // Settings › General › Check for updates (1.8.6): the answer comes as "update-check"
         "update-check" => {
             app.borrow().updater.check_now_from(arg0.as_str() == Some("fork"));
             Value::Null
         }
         "update-now" => {
+            crate::ensure_page_awake(app);
+            {
+                let mut s = app.borrow_mut();
+                if s.core.user_hidden {
+                    s.core.user_hidden = false;
+                    s.core.update_visibility();
+                }
+            }
             if let Some(p) = app.borrow().page.clone() {
                 p.event("update-now", Value::Null);
             }
@@ -725,6 +736,22 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
         }
         "radio-now" => {
             crate::radio::now(app, arg0.clone());
+            Value::Null
+        }
+        "timer-state" => {
+            let active = arg0 == true;
+            let rem_ms = args.get(1).and_then(Value::as_u64).unwrap_or(0);
+            let hwnd = {
+                let mut s = app.borrow_mut();
+                s.core.timer_active = active;
+                s.core.win.hwnd
+            };
+            crate::sync_timer_alarm(hwnd, active, rem_ms);
+            if active {
+                crate::ensure_page_awake(app);
+            } else {
+                crate::maybe_schedule_suspend(app);
+            }
             Value::Null
         }
         "radio-suwar" => crate::radio::suwar(),

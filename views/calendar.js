@@ -12,18 +12,21 @@
     return m >= 60 ? `in ${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ''}`.trim() : `in ${m} min`;
   }
 
+  const setText = (sel, val) => { const el = $(sel); if (el && el.textContent !== val) el.textContent = val; };
+
   function tick() {
     const now = Date.now();
     const on = feat('meetings');
     // the next meeting still to come, or one running now
     const next = events.find((e) => e.end > now);
-    const soon = on && next && next.start - now < 3 * 3600e3;
-    $('.mt-slide').hidden = !soon;
+    const soon = Boolean(on && next && next.start - now < 3 * 3600e3);
+    const mt = $('.mt-slide');
+    if (mt && mt.hidden !== !soon) mt.hidden = !soon;
     if (soon) {
-      $('#i-mt-title').textContent = next.title;
-      $('#i-mt-when').textContent = when(next, now);
+      setText('#i-mt-title', next.title);
+      setText('#i-mt-when', when(next, now));
     }
-    if (!on) return;
+    if (!on || !events.length) return;
 
     for (const ev of events) {
       const left = ev.start - now;

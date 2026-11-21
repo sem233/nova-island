@@ -152,6 +152,7 @@ pub fn start_every(emit: impl Fn(String) + Send + 'static, tick_ms: u64) -> Send
             let mut omni = omni::Omni::new();
             let tabs = tabs::Tabs::spawn();
             let mut private = win::Private::new();
+            let mut browser = win::BrowserTracker::new();
             let (mut last_key, mut prev_thumb): (Option<String>, String) = (None, String::new());
             let (mut thumb_ok, mut thumb_tries, mut tick) = (false, 0, 0u64);
             let mut rec = false;
@@ -253,8 +254,8 @@ pub fn start_every(emit: impl Fn(String) + Send + 'static, tick_ms: u64) -> Send
                     st.bright = brightness::get();
                 }
                 o = o.int("bright", if bright_ok { st.bright } else { -1 });
-                let fs = win::is_fullscreen();
-                o = o.bool("fs", fs).int("kl", win::keyboard_layout()).bool("caps", win::caps_lock());
+                let fg = win::foreground_snapshot();
+                o = o.bool("fs", fg.fullscreen).int("kl", fg.layout).bool("caps", win::caps_lock());
                 let seq = win::clipboard_seq();
                 // a change is reported once it's known whether it's private: the app copying it may
                 // still hold the clipboard (the Snipping Tool does), and then it waits a tick
@@ -262,21 +263,20 @@ pub fn start_every(emit: impl Fn(String) + Send + 'static, tick_ms: u64) -> Send
                 o = o.num("clip", seq as f64).bool("clipPriv", private).int("idle", win::idle_seconds());
                 let (pct, ac) = win::battery();
                 o = o.int("bat", pct).bool("ac", ac);
-                if tick % 4 == 1 {
+                if tick % 10 == 1 {
                     rec = win::recorder_running();
                 }
                 o = o.bool("rec", rec);
-                let (fg_proc, fg_title) = win::foreground_info();
-                o = o.str("fgProc", &fg_proc).str("fgTitle", &fg_title);
+                o = o.str("fgProc", &fg.proc_name).str("fgTitle", &fg.title);
                 // the address bar only while the island may sit in it (1.8.7)
                 let omni_json = if omni::WANTED.load(std::sync::atomic::Ordering::Relaxed) {
-                    omni.json(win::foreground(), &fg_proc, fs)
+                    omni.json(fg.hwnd, &fg.proc_name, fg.fullscreen)
                 } else {
                     omni.forget();
                     "null".into()
                 };
                 o = o.raw("omni", &omni_json);
-                o = o.raw("browser", &win::browser_json(&fg_proc, fs));
+                o = o.raw("browser", browser.json(fg.hwnd, &fg.proc_name, fg.fullscreen));
                 // the browser's tabs (new in 1.8, for "Stay in place"), read on their own thread
                 let tabs_json = tabs.lock().unwrap().clone();
                 o = o.raw("tabs", &tabs_json);

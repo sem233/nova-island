@@ -5,8 +5,7 @@
   if (!window.prefs?.checkUpdates) return;
 
   let current = '';
-  let ready = null;
-  let activeSource = null;
+  let lastCheckedSource = null;
 
   function makeUpdaterRow({ rowId, btnId, source, checkLabel, idleMsg, showVersion }) {
     const row = document.getElementById(rowId);
@@ -15,6 +14,7 @@
     const ver = row?.querySelector('.upd-ver');
     if (!row || !btn || !msg || !ver) return null;
 
+    let rowReady = null;
     const say = (text, version, tone) => {
       msg.textContent = text;
       ver.textContent = version || '';
@@ -22,18 +22,29 @@
     };
     const idle = () => {
       btn.disabled = false;
-      btn.textContent = ready ? 'Update now' : checkLabel;
-      btn.classList.toggle('accent', !!ready);
+      btn.textContent = rowReady ? 'Update now' : checkLabel;
+      btn.classList.toggle('accent', !!rowReady);
+    };
+
+    const failText = (reason) => {
+      if (reason === 'not-found') {
+        return source === 'fork'
+          ? 'Repository is private or release manifest is missing (HTTP 404)'
+          : 'No release manifest found on upstream (HTTP 404)';
+      }
+      if (reason === 'checksum') return 'Downloaded file verification failed (SHA-512 mismatch)';
+      if (reason === 'invalid-manifest') return 'Release manifest could not be read';
+      return "Couldn't check. Check your internet connection and try again";
     };
 
     btn.addEventListener('click', () => {
-      if (ready) {
+      if (rowReady) {
         btn.disabled = true;
         btn.textContent = 'Updating…';
         window.prefs.updateNow();
         return;
       }
-      activeSource = source;
+      lastCheckedSource = source;
       btn.disabled = true;
       btn.textContent = 'Checking…';
       say('Checking…', '', '');
@@ -47,24 +58,29 @@
       },
       onGeneral: (verStr) => {
         row.hidden = false;
-        if (!ready && !row.dataset.tone) {
+        if (!rowReady && !row.dataset.tone) {
           say(idleMsg, showVersion ? verStr : '', '');
         }
       },
       onResult: (r) => {
         if (r?.state === 'ready') {
-          ready = r.version;
+          rowReady = r.version;
           say('A new version is ready', r.version, 'new');
         } else if (r?.state === 'latest') {
           say('You have the latest version', current || r.version, 'ok');
         } else {
-          say("Couldn't check. Check your internet connection and try again", '', 'bad');
+          say(failText(r?.reason), '', 'bad');
         }
         idle();
       },
-      onReady: (v) => {
+      onReady: (v, failed) => {
+        if (failed) {
+          if (!v) rowReady = null;
+          idle();
+          return;
+        }
         if (!v) return;
-        ready = v;
+        rowReady = v;
         say('A new version is ready', v, 'new');
         idle();
       },
@@ -93,15 +109,20 @@
   if (!rows.length) return;
 
   window.prefs.onUpdateCheck?.((r) => {
-    const src = r?.source || activeSource || 'official';
+    const src = r?.source || lastCheckedSource || 'official';
     const target = rows.find((item) => item.source === src) || rows[0];
     target?.onResult(r);
   });
 
   window.prefs.onUpdate?.((u) => {
+    const src = u?.source || lastCheckedSource || 'official';
+    if (u?.failed) {
+      rows.forEach((item) => item.onReady(u.version, true));
+      return;
+    }
     if (u?.version) {
-      const target = rows.find((item) => item.source === activeSource) || rows[0];
-      target?.onReady(u.version);
+      const target = rows.find((item) => item.source === src) || rows[0];
+      target?.onReady(u.version, false);
     }
   });
 
@@ -116,6 +137,9 @@
   window.prefs.general().then(general);
   window.prefs.onGeneral?.(general);
   window.prefs.updateState?.().then((s) => {
-    if (s?.ready) rows[0]?.onReady(s.ready);
+    if (s?.ready) {
+      const target = rows.find((item) => item.source === (s.source || 'official')) || rows[0];
+      target?.onReady(s.ready, false);
+    }
   });
 })();

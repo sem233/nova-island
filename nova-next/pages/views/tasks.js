@@ -67,8 +67,22 @@
   const queue = [];
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
   let showing = null;
+  let nextTimer = null;
+  function scheduleNext(ms = 2000) {
+    clearTimeout(nextTimer);
+    nextTimer = null;
+    if (!on || showing || !queue.length) return;
+    nextTimer = setTimeout(() => {
+      nextTimer = null;
+      showNext();
+    }, ms);
+  }
   function showNext() {
-    if (showing || !queue.length || !state.visible || window.sceneShowing?.() || window.cardShowing?.()) return;
+    if (showing || !queue.length) return;
+    if (!state.visible || window.sceneShowing?.() || window.cardShowing?.()) {
+      scheduleNext(2000);
+      return;
+    }
     const x = queue.shift();
     if (!tasks.some((y) => y.id === x.id && !y.done)) return showNext();
     showing = x.id;
@@ -92,9 +106,12 @@
   });
   // the card left (closed, timed out or acted on): the next waiting reminder
   window.addEventListener('island:mode', (e) => {
+    if (e.detail.mode === 'expanded' && on) render();
     if (showing && e.detail.prev === 'reminder' && e.detail.mode !== 'reminder') {
       showing = null;
-      setTimeout(showNext, 800);
+      scheduleNext(800);
+    } else if (!showing && queue.length) {
+      scheduleNext(400);
     }
   });
   bridge.onTaskDue((x) => {
@@ -102,8 +119,6 @@
     queue.push(x);
     showNext();
   });
-  // a reminder that came while the island was hidden (full screen) or busy shows when it can
-  setInterval(showNext, 2000);
 
   // ---- the plugin: on, off, removed ----
   function apply(list) {
@@ -113,11 +128,17 @@
       state.tasksTab = now;
       refreshTabs();
     }
-    if (!now) queue.length = 0;
+    if (!now) {
+      queue.length = 0;
+      clearTimeout(nextTimer);
+      nextTimer = null;
+    }
   }
   bridge.onTasks((l) => { tasks = Array.isArray(l) ? l : []; render(); });
   bridge.tasksList?.().then((l) => { tasks = Array.isArray(l) ? l : []; render(); });
   bridge.onPlugins(apply);
   bridge.plugins().then(apply);
-  setInterval(render, 60000);
+  setInterval(() => {
+    if (on && (lastMode === 'expanded' || tasks.length > 0)) render();
+  }, 60000);
 })();

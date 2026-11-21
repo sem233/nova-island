@@ -9,10 +9,38 @@
   let nearSince = 0;
   let dwellTimer = null;
 
+  let blinkTimer = null;
+  let dblBlinkTimer = null;
+
+  function blink() {
+    eyes.classList.add('blink');
+    setTimeout(() => eyes.classList.remove('blink'), 130);
+  }
+
+  function stopBlink() {
+    clearTimeout(blinkTimer);
+    clearTimeout(dblBlinkTimer);
+    blinkTimer = null;
+    dblBlinkTimer = null;
+  }
+
+  function scheduleBlink() {
+    if (blinkTimer || !island.classList.contains('eyes') || state.features.noAnimations || !state.visible) return;
+    blinkTimer = setTimeout(() => {
+      blinkTimer = null;
+      if (!island.classList.contains('eyes') || state.features.noAnimations || !state.visible) return;
+      blink();
+      if (Math.random() < 0.2) dblBlinkTimer = setTimeout(blink, 260);
+      scheduleBlink();
+    }, 2400 + Math.random() * 3600);
+  }
+
   function apply() {
     const lingered = near && Date.now() - nearSince >= DWELL_MS;
     const show = feat('novaEyes') && !light() && !anchor.vertical && lingered && !state.hover && lastMode === 'idle';
-    island.classList.toggle('eyes', !!show);
+    if (island.classList.contains('eyes') !== !!show) island.classList.toggle('eyes', !!show);
+    if (show && !state.features.noAnimations && state.visible) scheduleBlink();
+    else stopBlink();
   }
 
   bridge.onNear((n) => {
@@ -40,19 +68,6 @@
     });
     apply();
   });
-
-  // natural blinking, now and then a double blink
-  function blink() {
-    eyes.classList.add('blink');
-    setTimeout(() => eyes.classList.remove('blink'), 130);
-  }
-  (function loop() {
-    if (island.classList.contains('eyes') && !state.features.noAnimations) {
-      blink();
-      if (Math.random() < 0.2) setTimeout(blink, 260);
-    }
-    setTimeout(loop, 2400 + Math.random() * 3600);
-  })();
 
   bridge.onHover(apply);
   window.addEventListener('island:features', apply);

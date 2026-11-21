@@ -141,10 +141,12 @@
 
   // Ramadan: until maghrib count down to iftar, after it to the next imsak
   function ramadan(d, now) {
-    const on = isRamadan(d) && d.today.times.imsak && feat('slidePrayer');
-    $('.rmd-slide').hidden = !on;
-    $('#pr-ramadan').hidden = !on;
-    view.classList.toggle('ramadan', !!on);
+    const on = !!(isRamadan(d) && d.today.times.imsak && feat('slidePrayer'));
+    const rmdSlide = $('.rmd-slide');
+    if (rmdSlide && rmdSlide.hidden !== !on) rmdSlide.hidden = !on;
+    const prRamadan = $('#pr-ramadan');
+    if (prRamadan && prRamadan.hidden !== !on) prRamadan.hidden = !on;
+    if (view.classList.contains('ramadan') !== on) view.classList.toggle('ramadan', on);
     if (!on) return;
     const imsak = at(d.today.date, d.today.times.imsak);
     const iftar = at(d.today.date, d.today.times.maghrib);
@@ -158,9 +160,12 @@
       target = now < imsak ? imsak : d.tomorrow?.times?.imsak ? at(d.tomorrow.date, d.tomorrow.times.imsak) : null;
     }
     if (!target) return;
-    setText('#i-rmd-name', label);
-    setText('#i-rmd-time', clock(target));
-    setText('#i-rmd-left', left(target - now));
+    const pillLive = state.visible && lastMode === 'idle' && !island.classList.contains('addr-line');
+    if (pillLive && rmdSlide?.classList.contains('on')) {
+      setText('#i-rmd-name', label);
+      setText('#i-rmd-time', clock(target));
+      setText('#i-rmd-left', left(target - now));
+    }
     if (lastMode === 'expanded') {
       const ltr = (t) => `⁦${t}⁩`;
       setText('#pr-ramadan', `رمضان كريم · ${label} ${ltr(clock(target))} · بعد ${ltr(left(target - now))}`);
@@ -176,7 +181,8 @@
   function tick() {
     const d = days();
     zone = d?.today?.tz || '';
-    view.classList.toggle('loading', !d);
+    const loading = !d;
+    if (view.classList.contains('loading') !== loading) view.classList.toggle('loading', loading);
     const prSlide = $('.pr-slide');
     if (prSlide && prSlide.hidden !== !d) prSlide.hidden = !d;
     const vPrItem = $('#v-pr-item');
@@ -186,6 +192,8 @@
     const now = new Date();
     const next = nextPrayer(d, now);
     const open = lastMode === 'expanded';
+    const pillLive = state.visible && lastMode === 'idle' && !anchor.vertical && !island.classList.contains('addr-line');
+    const vPillLive = state.visible && lastMode === 'idle' && anchor.vertical;
     if (next) {
       const ms = next.time - now;
       if (open) {
@@ -193,11 +201,15 @@
         setText('#pr-count', left(ms));
         setText('#pr-next-time', `${next.time.toDateString() === now.toDateString() ? 'اليوم' : 'غدًا'} ${clock(next.time)}`);
       }
-      setText('#i-pr-name', NAMES[next.key]);
-      setText('#i-pr-time', clock(next.time));
-      setText('#i-pr-left', left(ms));
-      setText('#v-pr-name', NAMES[next.key]);
-      setText('#v-pr-left', shortLeft(ms));
+      if ((pillLive && prSlide?.classList.contains('on')) || ms <= 60000) {
+        setText('#i-pr-name', NAMES[next.key]);
+        setText('#i-pr-time', clock(next.time));
+        setText('#i-pr-left', left(ms));
+      }
+      if (vPillLive) {
+        setText('#v-pr-name', NAMES[next.key]);
+        setText('#v-pr-left', shortLeft(ms));
+      }
     }
     if (open) {
       setText('#pr-hijri', d.today.hijri || '');
@@ -213,6 +225,7 @@
     }
     remind(d, now);
   }
+  window.prayerTick = tick;
 
   // for the morning card: the next prayer as text
   window.nextPrayerText = () => {
@@ -234,7 +247,9 @@
       tick();
     }
   });
-  window.addEventListener('island:mode', (e) => { if (e.detail?.mode === 'expanded') tick(); });
+  window.addEventListener('island:mode', (e) => {
+    if (e.detail?.mode === 'expanded' || e.detail?.mode === 'idle') tick();
+  });
   setInterval(tick, 1000);
   tick();
 })();

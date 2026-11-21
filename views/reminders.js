@@ -121,6 +121,7 @@
     bar.style.width = '100%';
     render();
     positionIsland();
+    scheduleTick(250);
   }
 
   function hide() {
@@ -128,6 +129,7 @@
     state.hover = false; // don't spring open under the cursor when the card leaves
     schedule();
     render();
+    scheduleTick();
   }
 
   function tick() {
@@ -157,7 +159,26 @@
     if (!state.visible || lastMode === 'expanded' || state.pinned || state.moving || (state.toast && now < state.toastUntil)) return;
     show(draw());
   }
-  setInterval(tick, 250);
+  let tickTimer = null;
+  function scheduleTick(ms) {
+    clearTimeout(tickTimer);
+    tickTimer = null;
+    let delay = ms;
+    if (delay == null) {
+      if (state.reminderUntil) delay = 250;
+      else if (!feat('reminders')) return;
+      else {
+        if (!nextAt) schedule();
+        delay = Math.max(1000, Math.min(15000, nextAt - Date.now()));
+      }
+    }
+    tickTimer = setTimeout(() => {
+      tickTimer = null;
+      tick();
+      scheduleTick();
+    }, delay);
+  }
+  scheduleTick();
 
   $('#rm-close').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -168,6 +189,13 @@
   // a new interval counts from now
   window.addEventListener('island:features', () => {
     if (nextAt && !state.reminderUntil && state.features.remindEvery !== nextEvery) schedule();
+    scheduleTick();
+  });
+  window.addEventListener('island:mode', () => {
+    if (!state.reminderUntil && nextAt && Date.now() >= nextAt) {
+      tick();
+      scheduleTick();
+    }
   });
 
   // other views open the big card for their own messages (welcome back, morning, breaks)

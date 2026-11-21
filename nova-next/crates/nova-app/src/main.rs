@@ -63,6 +63,8 @@ const WM_CALC_BLUR: u32 = WM_APP + 10; // calculator lost window activation
 const TIMER_CURSOR: usize = 1;
 const TIMER_DRAG: usize = 2;
 const TIMER_CAPTURE: usize = 3;
+const TIMER_SUSPEND: usize = 4;
+const TIMER_FINISH: usize = 5;
 const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
 const HOTKEY_TOGGLE: i32 = 1;
 
@@ -117,13 +119,74 @@ fn sync_page_power(a: &Rc<RefCell<App>>) {
     }
 }
 
-/// Signature of fields in `nova-sys` output that affect the island UI (excludes `idle`, `omni`, `browser`, `tabs`, `clip`, `rec`).
+/// Schedules WebView2 suspension when hidden unless Radio playback or a Timer needs to stay active.
+pub fn maybe_schedule_suspend(a: &Rc<RefCell<App>>) {
+    if arg("--test-idle").is_some() {
+        return;
+    }
+    let (hwnd, can_suspend) = {
+        let s = a.borrow();
+        (s.core.win.hwnd, !s.core.win.visible() && s.radio_now["playing"] != true && !s.core.timer_active)
+    };
+    unsafe {
+        let _ = KillTimer(Some(hwnd), TIMER_SUSPEND);
+        if can_suspend && !PAGE_SUSPENDED.with(|ps| ps.get()) {
+            SetTimer(Some(hwnd), TIMER_SUSPEND, 1000, None);
+        }
+    }
+}
+
+/// Arms or clears the Win32 timer that wakes WebView2 right when a running island timer ends.
+pub fn sync_timer_alarm(hwnd: HWND, active: bool, rem_ms: u64) {
+    unsafe {
+        let _ = KillTimer(Some(hwnd), TIMER_FINISH);
+        if active && rem_ms > 0 {
+            // +60 ms prevents Windows 15.6 ms timer coalescing from waking just before Date.now() >= endAt.
+            SetTimer(Some(hwnd), TIMER_FINISH, rem_ms.saturating_add(60).clamp(60, 86_400_000) as u32, None);
+        }
+    }
+}
+
+/// Ensures the island WebView2 is resumed before critical control/UI messages arrive.
+pub fn ensure_page_awake(a: &Rc<RefCell<App>>) {
+    let (hwnd, visible, page) = {
+        let s = a.borrow();
+        (s.core.win.hwnd, s.core.win.visible(), s.page.clone())
+    };
+    unsafe {
+        let _ = KillTimer(Some(hwnd), TIMER_SUSPEND);
+    }
+    if PAGE_SUSPENDED.with(|p| p.replace(false)) {
+        if let Some(p) = page {
+            p.set_suspended(false);
+        }
+    }
+    if visible {
+        sync_page_power(a);
+    }
+}
+
+/// Signature of fields in `nova-sys` output that affect the island UI.
+/// Excludes smooth playback `pos` drift while playing (renderer interpolates locally)
+/// and omits `fgProc`/`fgTitle` when nothing is playing (`has != true`).
 fn media_sig(v: &Value) -> String {
+    let has = v["has"] == true;
+    let playing = v["playing"] == true;
+    let pos_key = if has && !playing {
+        (v["pos"].as_f64().unwrap_or(0.0) * 10.0).round() as i64
+    } else {
+        0
+    };
+    let (fg_proc, fg_title) = if has {
+        (v["fgProc"].as_str().unwrap_or(""), v["fgTitle"].as_str().unwrap_or(""))
+    } else {
+        ("", "")
+    };
     format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        v["has"], v["playing"], v["title"], v["artist"], v["album"], v["app"],
-        v["dur"], v["pos"], v["thumb"], v["vol"], v["muted"], v["bright"],
-        v["fs"], v["kl"], v["caps"], v["fgProc"], v["fgTitle"], v["bat"], v["ac"]
+        has, playing, v["title"], v["artist"], v["album"], v["app"],
+        v["dur"], pos_key, v["thumb"], v["vol"], v["muted"], v["bright"],
+        v["fs"], v["kl"], v["caps"], fg_proc, fg_title, v["bat"], v["ac"]
     )
 }
 
@@ -323,10 +386,13 @@ pub fn schedule_capture(hwnd: HWND, ms: u32) {
     }
 }
 
-/// captureBackdrop(), then the next one (scheduleCapture)
+/// captureBackdrop(), then the next one (scheduleCapture); stops re-arming when hidden or glass is off.
 fn capture_tick(a: &Rc<RefCell<App>>, hwnd: HWND) {
     capture_now(a);
     let s = a.borrow();
+    if s.glass.screen_locked || !s.core.win.visible() || !s.glass.glass_live(&s.core.features) {
+        return;
+    }
     let next = s.glass.next_delay(s.core.active(), &s.core.features);
     drop(s);
     schedule_capture(hwnd, next);
@@ -447,6 +513,28 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                         capture_tick(&a, h);
                     } else if w.0 == TIMER_DRAG {
                         a.borrow_mut().core.follow_cursor();
+                    } else if w.0 == TIMER_SUSPEND {
+                        let _ = KillTimer(Some(h), TIMER_SUSPEND);
+                        if arg("--test-idle").is_none() {
+                            let s = a.borrow();
+                            let can_suspend = !s.core.win.visible() && s.radio_now["playing"] != true && !s.core.timer_active;
+                            let page = s.page.clone();
+                            drop(s);
+                            if can_suspend {
+                                if let Some(p) = page {
+                                    PAGE_SUSPENDED.with(|ps| ps.set(true));
+                                    PAGE_LOW_MEM.with(|m| m.set(true));
+                                    p.set_suspended(true);
+                                }
+                            }
+                        }
+                    } else if w.0 == TIMER_FINISH {
+                        let _ = KillTimer(Some(h), TIMER_FINISH);
+                        ensure_page_awake(&a);
+                        let page = a.borrow().page.clone();
+                        if let Some(p) = page {
+                            p.run("window.tickTimerNow?.()");
+                        }
                     }
                 }
                 return LRESULT(0);
@@ -608,6 +696,12 @@ fn drain_bus(a: &Rc<RefCell<App>>) {
                     // ...and the desktop widget, at once (tasks.json is saved before this comes)
                     nova_render::widget::redraw("tasks");
                 }
+                if matches!(ch.as_str(), "update" | "update-now" | "radio-play" | "app-notify") {
+                    ensure_page_awake(a);
+                }
+                if ch == "stats" && PAGE_SUSPENDED.with(|p| p.get()) {
+                    continue;
+                }
                 // another app's notification: the island's own toast shows it ("App · title: text")
                 if ch == "app-notify" {
                     if let Some(p) = a.borrow().page.clone() {
@@ -766,15 +860,29 @@ fn drain_sys(a: &Rc<RefCell<App>>) {
             continue;
         }
         let sig = media_sig(&data);
-        let idle_lt_5 = data.get("idle").and_then(Value::as_i64).is_some_and(|i| i < 5);
+        let has = data["has"] == true;
+        let playing = data["playing"] == true;
+        let pos = data["pos"].as_f64().unwrap_or(0.0);
+        let idle = data.get("idle").and_then(Value::as_i64).unwrap_or(0);
+        let idle_lt_5 = idle < 5;
+        let idle_away = idle >= 300;
         let should_push = {
             thread_local! {
-                static LAST_MEDIA: RefCell<(String, bool, Instant)> = RefCell::new((String::new(), true, Instant::now() - Duration::from_secs(60)));
+                static LAST_MEDIA: RefCell<(String, bool, bool, Option<(f64, Instant)>, Instant)> = RefCell::new((String::new(), true, false, None, Instant::now() - Duration::from_secs(60)));
             }
             LAST_MEDIA.with(|cell| {
                 let mut last = cell.borrow_mut();
-                if sig != last.0 || idle_lt_5 != last.1 || last.2.elapsed() >= Duration::from_secs(5) {
-                    *last = (sig, idle_lt_5, Instant::now());
+                let seek_jumped = if has && playing {
+                    match last.3 {
+                        Some((prev_pos, prev_at)) => ((prev_pos + prev_at.elapsed().as_secs_f64()) - pos).abs() > 2.5,
+                        None => true,
+                    }
+                } else {
+                    false
+                };
+                if sig != last.0 || idle_lt_5 != last.1 || idle_away != last.2 || seek_jumped || last.4.elapsed() >= Duration::from_secs(30) {
+                    let pos_track = if has && playing { Some((pos, Instant::now())) } else { None };
+                    *last = (sig, idle_lt_5, idle_away, pos_track, Instant::now());
                     true
                 } else {
                     false
@@ -876,21 +984,40 @@ fn run() -> Result<(), String> {
     let page_slot: Rc<RefCell<Option<Rc<Page>>>> = Rc::default();
     PAGE_SLOT.with(|s| *s.borrow_mut() = Some(page_slot.clone()));
     let send_slot = page_slot.clone();
+    let send_hwnd = hwnd.0 as isize;
     let send: Box<dyn Fn(&str, Value)> = Box::new(move |ch, data| {
         if let Some(p) = send_slot.borrow().as_ref() {
             if ch == core::DIM {
                 p.run(&format!("{DIM_JS}({})", data == true));
             } else if ch == "visibility" {
                 let show = data == true;
-                if show && PAGE_SUSPENDED.with(|s| s.replace(false)) {
-                    p.set_suspended(false);
-                    PAGE_LOW_MEM.with(|m| m.set(false));
-                }
-                p.event(ch, data);
-                if !show && !PAGE_SUSPENDED.with(|s| s.get()) && arg("--test-idle").is_none() {
-                    PAGE_SUSPENDED.with(|s| s.set(true));
+                let h = HWND(send_hwnd as *mut _);
+                if show {
+                    unsafe {
+                        let _ = KillTimer(Some(h), TIMER_SUSPEND);
+                    }
+                    if PAGE_SUSPENDED.with(|s| s.replace(false)) {
+                        p.set_suspended(false);
+                    } else {
+                        unsafe {
+                            let _ = p.controller.SetIsVisible(true);
+                        }
+                    }
+                    p.event(ch, data);
+                    schedule_capture(h, 200);
+                } else {
+                    p.event(ch, data);
+                    p.set_low_memory(true);
                     PAGE_LOW_MEM.with(|m| m.set(true));
-                    p.set_suspended(true);
+                    if arg("--test-idle").is_some() {
+                        unsafe {
+                            let _ = p.controller.SetIsVisible(false);
+                        }
+                    } else if !PAGE_SUSPENDED.with(|s| s.get()) {
+                        unsafe {
+                            SetTimer(Some(h), TIMER_SUSPEND, 250, None);
+                        }
+                    }
                 }
             } else {
                 p.event(ch, data);

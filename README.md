@@ -62,6 +62,14 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.13
+
+**Lower idle CPU & RAM across every theme** — stops invisible slide blur filters and off-screen progress bar layout animations while the island is resting or collapsed as a thin line, converts the system pollers (`nova-sys` foreground snapshot, `vlc` `IsWindow` fast-path + scan backoff, zero-alloc recorder detection, popup-resistant `BrowserTracker`), and moves `renderer.js`, Prayer, Reminders, Companion, Tasks, System, NetSpeed, and Nova eyes onto demand-driven timers and guarded DOM writes (eliminating ~99% of idle `Layout` passes and cutting idle CPU ~3.2× on glass and ~45% on solid themes).
+
+**Background Radio & Timer reliability** — defers WebView2 suspension cleanly after hiding, skips suspension and adds a native Win32 alarm (`TIMER_FINISH`) so active Quran Radio audio and Timer/Focus completion alerts continue working reliably even when the island is hidden or in fullscreen mode, and wakes the page cleanly on "Update now" / radio playback.
+
+**Independent updater rows & clear fork status** — separates ready-update tracking (`source`) and 24h error logs between `NOVA-TECH-KIT/nova-island` and `sem233/nova-island`, and reports clear localized error reasons (such as HTTP 404 when the fork repository is private or lacks `latest.yml`).
+
 ## What's new in 1.8.12
 
 **Drastically lower idle RAM & CPU** — switches WebView2 to `MemoryUsageTargetLevel::LOW` whenever the island is resting collapsed and restores `NORMAL` on hover/pin/interaction, suspends WebView2 (`TrySuspend`) and pauses CSS animations when the island is hidden, deduplicates `media` IPC updates, slows idle stats/layout/reminder polling, and guards Prayer DOM updates so all animations and features stay identical while cutting idle memory and CPU usage dramatically.

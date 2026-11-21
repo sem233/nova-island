@@ -86,6 +86,10 @@ fn pre_newer(a: &str, b: &str) -> bool {
     }
 }
 
+fn is_offline_err(msg: &str) -> bool {
+    ["fetch failed", "timeout", "network unavailable", "12007", "12029", "12002"].iter().any(|w| msg.contains(w))
+}
+
 fn sha512_b64(bytes: &[u8]) -> String {
     nova_sys::media::base64(&Sha512::digest(bytes))
 }
@@ -98,7 +102,7 @@ fn safe_name(p: &str) -> Option<String> {
 
 struct State {
     enabled: bool,
-    ready: Option<(String, PathBuf, String)>, // version, file, its sha512 (latest.yml's)
+    ready: Option<(String, PathBuf, String, String)>, // version, file, sha512, source ("official" | "fork")
     installing: bool,
     check_failed: bool,
     logged: HashMap<String, f64>,
@@ -148,36 +152,37 @@ impl Updater {
         });
     }
 
-    /// One short line per kind of failure, at most once a day; none while offline.
-    fn log_error(&self, what: &str, msg: &str, record_auto: bool) {
+    /// One short line per kind of failure per source, at most once a day; none while offline.
+    fn log_error(&self, source: &str, what: &str, msg: &str, record_auto: bool) {
         let mut st = self.st.lock().unwrap();
         if record_auto {
             st.check_failed = true;
         }
-        let offline = ["fetch failed", "timeout", "network unavailable", "12007", "12029", "12002"].iter().any(|w| msg.contains(w));
-        if offline {
+        if is_offline_err(msg) {
             return;
         }
-        let key = format!("{what}: {msg}");
+        let key = format!("{source}:{what}:{msg}");
         if now_ms() - st.logged.get(&key).copied().unwrap_or(0.0) < DAY_MS {
             return;
         }
-        st.logged.insert(key.clone(), now_ms());
+        st.logged.insert(key, now_ms());
         drop(st);
-        nova_core::log::info(&format!("update {key}"));
+        nova_core::log::info(&format!("update ({source}) {what}: {msg}"));
     }
 
     fn check(&self) {
         let feed = self.feed.clone();
-        let _ = self.check_feed(&feed, true);
+        let _ = self.check_feed(&feed, "official", true);
     }
 
-    fn check_feed(&self, feed: &str, record_auto: bool) -> bool {
-        // a ready update is offered again on every check until it is installed
-        let ready = self.st.lock().unwrap().ready.as_ref().map(|r| r.0.clone());
-        if let Some(v) = ready {
-            self.ctx.send("update", json!({ "version": v }));
-            return false;
+    fn check_feed(&self, feed: &str, source: &str, record_auto: bool) -> Result<(), &'static str> {
+        // a ready update from this source stays offered on every check until installed
+        let ready = self.st.lock().unwrap().ready.as_ref().map(|r| (r.0.clone(), r.3.clone()));
+        if let Some((v, src)) = ready {
+            if src == source {
+                self.ctx.send("update", json!({ "version": v, "source": src }));
+                return Ok(());
+            }
         }
         if record_auto {
             self.st.lock().unwrap().check_failed = false;
@@ -185,60 +190,64 @@ impl Updater {
         let yml = match nova_core::http::get(&format!("{feed}latest.yml"), 30000) {
             Ok(r) if r.ok() => r.text(),
             Ok(r) => {
-                let tail = if r.status == 404 { " (latest.yml not found)" } else { "" };
-                self.log_error("check failed", &format!("HTTP {}{tail}", r.status), record_auto);
-                return true;
+                let (tail, reason) = if r.status == 404 {
+                    (" (latest.yml not found — repo may be private or no release asset)", "not-found")
+                } else {
+                    ("", "http")
+                };
+                self.log_error(source, "check failed", &format!("HTTP {}{tail}", r.status), record_auto);
+                return Err(reason);
             }
             Err(e) => {
-                self.log_error("check failed", &e, record_auto);
-                return true;
+                self.log_error(source, "check failed", &e, record_auto);
+                return Err(if is_offline_err(&e) { "offline" } else { "http" });
             }
         };
         let Some(rel) = parse_latest(&yml) else {
-            self.log_error("check failed", "latest.yml can't be read", record_auto);
-            return true;
+            self.log_error(source, "check failed", "latest.yml can't be read", record_auto);
+            return Err("invalid-manifest");
         };
         if !newer(&rel.version, crate::news::VERSION) {
-            return false;
+            return Ok(());
         }
         let Some(name) = safe_name(&rel.path) else {
-            self.log_error("check failed", "bad file name in latest.yml", record_auto);
-            return true;
+            self.log_error(source, "check failed", "bad file name in latest.yml", record_auto);
+            return Err("invalid-manifest");
         };
         let file = self.pending.join(&name);
         // already downloaded earlier (the app was closed before installing it)
         let have = std::fs::read(&file).ok().filter(|b| sha512_b64(b) == rel.sha512);
         if have.is_none() {
-            nova_core::log::info(&format!("update {} available, downloading", rel.version));
+            nova_core::log::info(&format!("update {} available ({source}), downloading", rel.version));
             let body = match nova_core::http::get(&format!("{feed}{}", nova_core::http::encode_component(&name)), 10 * 60 * 1000) {
                 Ok(r) if r.ok() => r.body,
                 Ok(r) => {
-                    self.log_error("download failed", &format!("HTTP {}", r.status), record_auto);
-                    return true;
+                    self.log_error(source, "download failed", &format!("HTTP {}", r.status), record_auto);
+                    return Err(if r.status == 404 { "not-found" } else { "http" });
                 }
                 Err(e) => {
-                    self.log_error("download failed", &e, record_auto);
-                    return true;
+                    self.log_error(source, "download failed", &e, record_auto);
+                    return Err(if is_offline_err(&e) { "offline" } else { "http" });
                 }
             };
             if sha512_b64(&body) != rel.sha512 {
-                self.log_error("download failed", "sha512 checksum mismatch", record_auto);
-                return true;
+                self.log_error(source, "download failed", "sha512 checksum mismatch", record_auto);
+                return Err("checksum");
             }
             let _ = std::fs::remove_dir_all(&self.pending);
             if let Err(e) = std::fs::create_dir_all(&self.pending).and_then(|_| std::fs::write(&file, &body)) {
-                self.log_error("download failed", &e.to_string(), record_auto);
-                return true;
+                self.log_error(source, "download failed", &e.to_string(), record_auto);
+                return Err("io");
             }
         }
-        nova_core::log::info(&format!("update {} ready", rel.version));
-        self.st.lock().unwrap().ready = Some((rel.version.clone(), file, rel.sha512.clone()));
-        self.ctx.send("update", json!({ "version": rel.version }));
-        false
+        nova_core::log::info(&format!("update {} ready ({source})", rel.version));
+        self.st.lock().unwrap().ready = Some((rel.version.clone(), file, rel.sha512.clone(), source.to_string()));
+        self.ctx.send("update", json!({ "version": rel.version, "source": source }));
+        Ok(())
     }
 
     /// Settings' "Check now": checks the original repo (`fork=false`) or user's fork (`fork=true`).
-    /// Answers on `"update-check"` with `{ state, version, source }`.
+    /// Answers on `"update-check"` with `{ state, version, source, reason }`.
     pub fn check_now(self: &Arc<Self>) {
         self.check_now_from(false);
     }
@@ -246,23 +255,28 @@ impl Updater {
     pub fn check_now_from(self: &Arc<Self>, fork: bool) {
         let me = self.clone();
         std::thread::spawn(move || {
+            let source = if fork { "fork" } else { "official" };
             let feed = if fork { FORK_FEED.to_string() } else { me.feed.clone() };
-            let failed = me.check_feed(&feed, !fork);
+            let res = me.check_feed(&feed, source, !fork);
             let st = me.st.lock().unwrap();
-            let (state, version) = match (&st.ready, failed) {
-                (Some(r), _) => ("ready", r.0.clone()),
-                (None, true) => ("failed", String::new()),
-                (None, false) => ("latest", crate::news::VERSION.to_string()),
+            let same_ready = st.ready.as_ref().filter(|r| r.3 == source);
+            let (state, version, reason) = match (same_ready, res) {
+                (Some(r), _) => ("ready", r.0.clone(), ""),
+                (None, Err(why)) => ("failed", String::new(), why),
+                (None, Ok(())) => ("latest", crate::news::VERSION.to_string(), ""),
             };
             drop(st);
-            let source = if fork { "fork" } else { "official" };
-            me.ctx.send("update-check", json!({ "state": state, "version": version, "source": source }));
+            me.ctx.send("update-check", json!({ "state": state, "version": version, "source": source, "reason": reason }));
         });
     }
 
-    /// The version downloaded and waiting to be installed, if any (Settings' update bar).
+    /// The version and source downloaded and waiting to be installed, if any (Settings' update bar).
+    pub fn ready_info(&self) -> Option<(String, String)> {
+        self.st.lock().unwrap().ready.as_ref().map(|r| (r.0.clone(), r.3.clone()))
+    }
+
     pub fn ready_version(&self) -> Option<String> {
-        self.st.lock().unwrap().ready.as_ref().map(|r| r.0.clone())
+        self.ready_info().map(|(v, _)| v)
     }
 
     pub fn set_enabled(&self, on: bool) {
@@ -287,7 +301,7 @@ impl Updater {
     /// The caller quits the app. False when there is nothing to install.
     fn run_installer(&self, reopen: bool) -> bool {
         let mut st = self.st.lock().unwrap();
-        let Some((v, file, sha)) = st.ready.clone() else { return false };
+        let Some((v, file, sha, _src)) = st.ready.clone() else { return false };
         if st.installing {
             return false;
         }
@@ -366,5 +380,7 @@ mod tests {
     fn feeds_stay_separate() {
         assert_eq!(FEED, "https://github.com/NOVA-TECH-KIT/nova-island/releases/latest/download/");
         assert_eq!(FORK_FEED, "https://github.com/sem233/nova-island/releases/latest/download/");
+        assert!(is_offline_err("fetch failed"));
+        assert!(!is_offline_err("HTTP 404 (latest.yml not found)"));
     }
 }

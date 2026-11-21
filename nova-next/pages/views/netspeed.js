@@ -33,22 +33,46 @@
   // a new ping comes every 10 s; stats every 2 s carry the same one in between
   let lastPing;
   let pingSeen = 0;
+  let lastStats = null;
+  const setText = (el, val) => { if (el && el.textContent !== val) el.textContent = val; };
+
+  function renderNet(s = lastStats) {
+    if (!s || s.rx === undefined) return;
+    const ping = s.ping ?? null;
+    const pingTxt = ping == null ? '' : `${ping} ms`;
+    const grade = ping == null ? '' : ping < 60 ? 'good' : ping <= 120 ? 'ok' : 'bad';
+    const rxTxt = rate(s.rx);
+    const txTxt = rate(s.tx);
+
+    const netSlide = $('.net-slide');
+    if (state.visible && lastMode === 'idle' && !anchor.vertical && !island.classList.contains('addr-line') && netSlide?.classList.contains('on')) {
+      setText($('#i-rx'), rxTxt);
+      setText($('#i-tx'), txTxt);
+      const ip = $('#i-ping');
+      setText(ip, pingTxt);
+      if (ip && (ip.dataset.grade || '') !== grade) ip.dataset.grade = grade;
+    }
+    if (lastMode === 'expanded' && state.tab === 'system') {
+      setText($('#net-live'), `↓ ${rxTxt}  ↑ ${txTxt}`);
+      const np = $('#net-ping');
+      setText(np, pingTxt);
+      if (np && (np.dataset.grade || '') !== grade) np.dataset.grade = grade;
+    }
+  }
+
   bridge.onStats((s) => {
     if (s.rx === undefined) return;
+    lastStats = s;
+    renderNet(s);
     const ping = s.ping ?? null;
-    $('#i-rx').textContent = rate(s.rx);
-    $('#i-tx').textContent = rate(s.tx);
-    $('#i-ping').textContent = ping == null ? '' : `${ping} ms`;
-    // for games: under 60 ms good (green), up to 120 fine (yellow), more is bad (red)
-    const grade = ping == null ? '' : ping < 60 ? 'good' : ping <= 120 ? 'ok' : 'bad';
-    for (const el of [$('#i-ping'), $('#net-ping')]) el.dataset.grade = grade;
-    $('#net-live').textContent = `↓ ${rate(s.rx)}  ↑ ${rate(s.tx)}`;
-    $('#net-ping').textContent = ping == null ? '' : `${ping} ms`;
     if (ping !== lastPing || Date.now() - pingSeen > 9500) {
       lastPing = ping;
       pingSeen = Date.now();
       watch(ping);
     }
   });
+  window.addEventListener('island:slide', () => renderNet());
+  window.addEventListener('island:mode', () => renderNet());
+  window.addEventListener('island:tab', (e) => { if (e.detail?.tab === 'system') renderNet(); });
 
 })();

@@ -18,7 +18,7 @@ use windows::{
 };
 
 pub const CAPTURE_ACTIVE_MS: u32 = 700;
-pub const CAPTURE_IDLE_MS: u32 = 3000;
+pub const CAPTURE_IDLE_MS: u32 = 10_000;
 pub const CAPTURE_FROZEN_MS: u32 = 60 * 1000; // "Freeze glass while closed"
 
 pub struct Glass {

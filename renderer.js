@@ -2,6 +2,14 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 const bridge = window.nova;
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const setText = (selOrEl, val) => {
+  const el = typeof selOrEl === 'string' ? $(selOrEl) : selOrEl;
+  const s = String(val ?? '');
+  if (el && el.textContent !== s) el.textContent = s;
+};
+const setClass = (el, cls, on) => {
+  if (el && el.classList.contains(cls) !== !!on) el.classList.toggle(cls, !!on);
+};
 
 const island = $('#island');
 const ICON_X = '<svg class="s" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></svg>';
@@ -110,7 +118,8 @@ function currentMode() {
 let lastMode = '';
 function render() {
   const mode = currentMode();
-  if (mode !== lastMode) {
+  const modeChanged = mode !== lastMode;
+  if (modeChanged) {
     island.classList.toggle('shrinking', !!lastMode && SIZE[mode] < SIZE[lastMode]);
     island.classList.remove('idle', 'compact', 'toast', 'peek', 'reminder', 'scene', 'expanded');
     island.classList.add(mode);
@@ -118,14 +127,16 @@ function render() {
     lastMode = mode;
     if (typeof positionIsland === 'function') positionIsland();
     if (typeof wake === 'function') wake();
+    if (typeof tickClock === 'function' && (mode === 'expanded' || mode === 'idle')) tickClock();
+    if (typeof renderStats === 'function' && mode === 'expanded') renderStats();
     window.dispatchEvent(new CustomEvent('island:mode', { detail: { mode, prev } }));
   }
-  island.classList.toggle('has-media', !!state.media.has);
-  island.classList.toggle('playing', !!state.media.playing);
+  setClass(island, 'has-media', !!state.media.has);
+  setClass(island, 'playing', !!state.media.playing);
   const kind = compactKind();
   for (const el of [$('.l-compact'), $('.l-vcompact')]) {
-    el.classList.toggle('timer', kind === 'timer');
-    el.classList.toggle('dl', kind === 'dl');
+    setClass(el, 'timer', kind === 'timer');
+    setClass(el, 'dl', kind === 'dl');
   }
   const showTitle = kind === 'dl' || (kind === 'media' && feat('mediaTitle'));
   const wide = showTitle;
@@ -134,7 +145,9 @@ function render() {
     if (typeof positionIsland === 'function') positionIsland();
   }
   setCompactTitle(!showTitle ? '' : kind === 'media' ? state.media.title : state.dl.title);
-  $('.c-title').hidden = !showTitle;
+  const titleBox = $('.c-title');
+  if (titleBox && titleBox.hidden !== !showTitle) titleBox.hidden = !showTitle;
+  if (modeChanged && state.visible && typeof reportRect === 'function') reportRect();
 }
 
 // Title between the art and the equalizer; scrolls back and forth when it doesn't fit.
@@ -212,7 +225,7 @@ function reportRect() {
 const light = () => !!(state.features.noBlur || state.features.noAnimations || state.features.glassFreeze);
 setTimeout(function reportLoop() {
   if (state.visible) reportRect();
-  setTimeout(reportLoop, !state.visible ? 600 : frameRunning || state.moving ? 50 : light() ? 500 : 400);
+  setTimeout(reportLoop, !state.visible ? 4000 : frameRunning || state.moving ? 50 : 2500);
 }, 0);
 
 bridge.onToggle(() => {
@@ -321,18 +334,25 @@ function positionIsland() {
 }
 
 bridge.onAnchor((a) => {
+  const prevLine = island.classList.contains('addr-line');
   anchor = a;
-  island.classList.toggle('addr-slim', a.addr === 'slim');
-  island.classList.toggle('addr-line', a.addr === 'line');
+  setClass(island, 'addr-slim', a.addr === 'slim');
+  setClass(island, 'addr-line', a.addr === 'line');
   if (a.addr) {
     island.style.setProperty('--sw', `${a.sw}px`);
     island.style.setProperty('--sh', `${a.sh}px`);
   }
-  island.classList.toggle('docked', !!a.docked);
-  island.classList.toggle('vertical', !!a.vertical);
-  island.classList.toggle('side-left', !!a.vertical && a.side === 'left');
-  island.classList.toggle('side-right', !!a.vertical && a.side === 'right');
+  setClass(island, 'docked', !!a.docked);
+  setClass(island, 'vertical', !!a.vertical);
+  setClass(island, 'side-left', !!a.vertical && a.side === 'left');
+  setClass(island, 'side-right', !!a.vertical && a.side === 'right');
   positionIsland();
+  if (prevLine && a.addr !== 'line') {
+    tickClock();
+    window.prayerTick?.();
+    renderStats();
+  }
+  if (state.visible) reportRect();
 });
 
 island.addEventListener('contextmenu', (e) => {
@@ -382,7 +402,7 @@ bridge.onBackdrop(async (frame) => {
   offCtx.filter = 'blur(22px) saturate(180%) brightness(.92)';
   offCtx.drawImage(img, -24, -24, w + 48, h + 48);
   img.close?.();
-  fadeFrames = 10;
+  fadeFrames = 4;
   wake(300);
 });
 
@@ -390,12 +410,17 @@ const segThumb = $('.seg-thumb');
 function placeSegThumb() {
   const a = $('.tab.active');
   if (!a) return;
-  segThumb.style.width = `${a.offsetWidth}px`;
-  segThumb.style.transform = `translateX(${a.offsetLeft}px)`;
+  const w = `${a.offsetWidth}px`;
+  const tr = `translateX(${a.offsetLeft}px)`;
+  if (segThumb.style.width !== w) segThumb.style.width = w;
+  if (segThumb.style.transform !== tr) segThumb.style.transform = tr;
 }
 
+const mediaProgressActive = () =>
+  lastMode === 'expanded' && state.visible && (seek.dragging || (state.tab === 'media' && state.media.has && state.media.playing && state.media.dur > 0));
+
 // The frame loop only runs while something moves: the island morphing, a fresh backdrop
-// fading in, or the open island (tab thumb, media progress). Idle, it stops completely.
+// fading in, or live media playback on the Media tab. Idle (including System/Prayer), it stops.
 let frameRunning = false;
 let awakeUntil = 0;
 let lastBd = '';
@@ -408,9 +433,10 @@ function wake(ms = 900) {
 }
 
 function frame() {
+  const now = performance.now();
   // reading the layout every frame while the island sits open is wasted work; whole pixels, so
   // the captured glass doesn't tremble at its edges
-  if (state.moving || performance.now() < awakeUntil) {
+  if (state.moving || now < awakeUntil) {
     const r = island.getBoundingClientRect();
     const key = `${Math.round(r.left)},${Math.round(r.top)}`;
     if (key !== lastBd) {
@@ -419,15 +445,17 @@ function frame() {
     }
   }
   if (fadeFrames > 0) {
-    bdCtx.globalAlpha = fadeFrames === 1 ? 1 : 0.22;
+    bdCtx.globalAlpha = fadeFrames === 1 ? 1 : 0.38;
     bdCtx.drawImage(off, 0, 0);
     fadeFrames--;
   }
-  if (lastMode === 'expanded') {
+  if (lastMode === 'expanded' && (now < awakeUntil || seek.dragging)) {
     placeSegThumb();
+  }
+  if (mediaProgressActive()) {
     tickProgress();
   }
-  if (fadeFrames > 0 || lastMode === 'expanded' || state.moving || performance.now() < awakeUntil) {
+  if (fadeFrames > 0 || mediaProgressActive() || state.moving || now < awakeUntil) {
     requestAnimationFrame(frame);
   } else {
     frameRunning = false;
@@ -444,17 +472,27 @@ function selectTab(tab) {
     b.setAttribute('aria-selected', on);
   });
   $$('.view').forEach((v) => v.classList.toggle('active', v.id === `v-${tab}`));
+  placeSegThumb();
+  if (lastMode === 'expanded') wake(450);
+  window.dispatchEvent(new CustomEvent('island:tab', { detail: { tab } }));
 }
 
 // ---------------- clock ----------------
 function tickClock() {
+  if (!state.visible && lastMode !== 'expanded') return;
   const d = new Date();
-  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const date = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-  $('#x-clock').textContent = $('#i-time').textContent = time;
-  $('#x-date').textContent = $('#i-date').textContent = date;
-  $('#v-time').textContent = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-  $('#v-day').textContent = d.toLocaleDateString([], { weekday: 'short', day: 'numeric' });
+  if (lastMode === 'expanded' || (!island.classList.contains('addr-line') && !anchor.vertical)) {
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const date = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+    setText('#i-time', time);
+    setText('#x-clock', time);
+    setText('#i-date', date);
+    setText('#x-date', date);
+  }
+  if (anchor.vertical) {
+    setText('#v-time', d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }));
+    setText('#v-day', d.toLocaleDateString([], { weekday: 'short', day: 'numeric' }));
+  }
 }
 tickClock();
 setInterval(tickClock, 5000);
@@ -462,7 +500,7 @@ setInterval(tickClock, 5000);
 // ---------------- idle pill: rotates clock/weather, CPU/RAM and the next prayer ----------------
 let infoSlide = 0;
 setInterval(() => {
-  if (lastMode !== 'idle') return;
+  if (!state.visible || anchor.vertical || lastMode !== 'idle' || island.classList.contains('addr-line')) return;
   showSlide(infoSlide + 1);
 }, 6000);
 
@@ -472,21 +510,39 @@ function showSlide(n) {
   let slides = all.filter((s) => !s.hidden && !s.classList.contains('off'));
   if (!slides.length) slides = [all[0]];
   infoSlide = n % slides.length;
-  all.forEach((s) => s.classList.toggle('on', s === slides[infoSlide]));
+  const target = slides[infoSlide];
+  all.forEach((s) => setClass(s, 'on', s === target));
+  window.prayerTick?.();
+  renderStats();
+  window.dispatchEvent(new CustomEvent('island:slide'));
 }
 
-bridge.onStats((s) => {
+let lastStats = null;
+function renderStats(s = lastStats) {
+  if (!s) return;
+  const open = lastMode === 'expanded';
+  const sysSlide = $('[data-feat="slideStats"]');
+  const showLine = state.visible && lastMode === 'idle' && !island.classList.contains('addr-line') && !anchor.vertical && sysSlide?.classList.contains('on');
+  if (!open && !showLine) return;
   const set = (id, v) => {
-    $(`#i-${id}`).textContent = `${Math.round(v * 100)}%`;
-    const bar = $(`#i-${id}-bar`);
-    bar.style.width = `${Math.round(v * 100)}%`;
-    bar.classList.toggle('warn', v >= 0.7 && v < 0.9);
-    bar.classList.toggle('hot', v >= 0.9);
+    const pct = Math.round(v * 100);
+    if (showLine) {
+      setText(`#i-${id}`, `${pct}%`);
+      const bar = $(`#i-${id}-bar`);
+      const tr = `scaleX(${(pct / 100).toFixed(2)})`;
+      if (bar.style.transform !== tr) bar.style.transform = tr;
+      setClass(bar, 'warn', v >= 0.7 && v < 0.9);
+      setClass(bar, 'hot', v >= 0.9);
+    }
+    if (open) setText(`#v-${id}`, `${pct}%`);
   };
   set('cpu', s.cpu);
   set('ram', s.ram);
-  $('#v-cpu').textContent = `${Math.round(s.cpu * 100)}%`;
-  $('#v-ram').textContent = `${Math.round(s.ram * 100)}%`;
+}
+
+bridge.onStats((s) => {
+  lastStats = s;
+  renderStats(s);
 });
 
 // ---------------- sliders ----------------
@@ -664,13 +720,14 @@ bridge.onMedia((m) => {
     $('#m-title').textContent = $('#p-title').textContent = m.title || 'Unknown';
     const sub = m.artist || m.album || appName(m.app);
     $('#m-artist').textContent = $('#p-artist').textContent = sub;
-    $('#p-eyebrow').textContent = appName(m.app) ? `Now Playing · ${appName(m.app)}` : 'Now Playing';
+    setText('#p-eyebrow', appName(m.app) ? `Now Playing · ${appName(m.app)}` : 'Now Playing');
   }
-  $('#x-app-name').textContent = m.has ? appName(m.app) || 'Media' : 'Idle';
-  $('#v-media').classList.toggle('browser-src', m.has && BROWSERS.some((b) => (m.app || '').toLowerCase().includes(b)) && !(m.app || '').toLowerCase().includes('firefox'));
-  $('#v-media').classList.toggle('none', !m.has);
+  setText('#x-app-name', m.has ? appName(m.app) || 'Media' : 'Idle');
+  setClass($('#v-media'), 'browser-src', m.has && BROWSERS.some((b) => (m.app || '').toLowerCase().includes(b)) && !(m.app || '').toLowerCase().includes('firefox'));
+  setClass($('#v-media'), 'none', !m.has);
   setPlayingUI(!!m.playing);
-  $('#m-progress').classList.toggle('hidden', !(m.dur > 0));
+  setClass($('#m-progress'), 'hidden', !(m.dur > 0));
+  if (mediaProgressActive()) wake(200);
 
   handleVolume(m);
   handleBrightness(m);
@@ -918,6 +975,7 @@ function setTimer(min, phase = null) {
   island.classList.toggle('break-on', phase === 'break');
   $$('[data-min]').forEach((b) => b.classList.toggle('sel', Number(b.dataset.min) === min));
   drawTimer();
+  syncTimerLoop();
   render();
 }
 
@@ -977,6 +1035,7 @@ $('#tm-start').addEventListener('click', () => {
     t.running = true;
   }
   drawTimer();
+  syncTimerLoop();
   render();
 });
 
@@ -989,6 +1048,7 @@ function startPhase(phase) {
   state.timer.endAt = Date.now() + state.timer.remaining * 1000;
   state.timer.running = true;
   drawTimer();
+  syncTimerLoop();
   render();
   // Nova puts her headband on and opens her laptop
   if (phase === 'focus' && feat('novaFocus')) {
@@ -1015,11 +1075,33 @@ $('#tm-reset').addEventListener('click', () => {
   state.timer = { total: 0, remaining: 0, endAt: 0, running: false };
   $$('[data-min]').forEach((b) => b.classList.remove('sel'));
   drawTimer();
+  syncTimerLoop();
   render();
 });
 
-setInterval(() => {
-  if (!state.timer.running) return;
+let timerLoop = null;
+let lastTimerEndSent = -1;
+function syncTimerLoop() {
+  const on = !!state.timer.running;
+  if (on && !timerLoop) {
+    timerLoop = setInterval(tickTimer, 250);
+  } else if (!on && timerLoop) {
+    clearInterval(timerLoop);
+    timerLoop = null;
+  }
+  const remMs = on ? Math.max(1, Math.round(state.timer.endAt - Date.now())) : 0;
+  const sig = on ? state.timer.endAt : 0;
+  if (sig !== lastTimerEndSent) {
+    lastTimerEndSent = sig;
+    bridge.timerState?.(on, remMs);
+  }
+}
+
+function tickTimer() {
+  if (!state.timer.running) {
+    syncTimerLoop();
+    return;
+  }
   const rem = drawTimer();
   if (rem <= 0 && state.timer.phase) {
     const wasFocus = state.timer.phase === 'focus';
@@ -1045,18 +1127,28 @@ setInterval(() => {
       state.toastAction = () => startPhase('focus');
       beep();
     }
+    syncTimerLoop();
     return;
   }
   if (rem <= 0) {
     state.timer = { total: 0, remaining: 0, endAt: 0, running: false };
     $$('[data-min]').forEach((b) => b.classList.remove('sel'));
     drawTimer();
+    syncTimerLoop();
     showToast('done', 'Timer Done', '', 0, 4000);
     island.classList.add('alert');
     setTimeout(() => island.classList.remove('alert'), 1000);
     beep();
   }
-}, 250);
+}
+window.tickTimerNow = () => {
+  tickTimer();
+  if (state.timer.running) {
+    const leftMs = Math.max(0, state.timer.endAt - Date.now());
+    if (leftMs <= 250) setTimeout(tickTimer, leftMs + 25);
+    else bridge.timerState?.(true, leftMs);
+  }
+};
 
 // ---------------- settings ----------------
 const TAB_FEATURE = { media: 'tabMedia', apps: 'tabApps', shelf: 'tabShelf', prayer: 'tabPrayer', timer: 'tabTimer', system: 'tabSystem' };
@@ -1099,7 +1191,16 @@ bridge.onFeatures(applyFeatures);
 // a screen recorder is running (NVIDIA Instant Replay, OBS): a glass theme turns solid until it's gone
 bridge.onRecording((on) => document.body.classList.toggle('th-rec', !!on));
 bridge.onSaver((s) => showToast('saver', s.on ? 'Battery saver is on' : 'Battery saver is off', s.pct >= 0 ? `${s.pct}%` : '', 0, 3500));
-bridge.onVisibility((v) => { state.visible = !!v; document.body.classList.toggle('island-hidden', !v); });
+bridge.onVisibility((v) => {
+  state.visible = !!v;
+  document.body.classList.toggle('island-hidden', !v);
+  if (v) {
+    tickClock();
+    window.prayerTick?.();
+    renderStats();
+    reportRect();
+  }
+});
 bridge.features().then(applyFeatures);
 $('#open-settings').addEventListener('click', () => bridge.openSettings());
 
