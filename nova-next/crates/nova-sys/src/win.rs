@@ -129,11 +129,29 @@ pub fn is_fullscreen() -> bool {
 ///     back to a hidden island (1.8.1)
 ///   the Snipping Tool's overlay (Win+Shift+S): the island hid, so no screenshot had it (1.8.3)
 pub fn may_hide_island(class: &str, process: &str) -> bool {
-    if matches!(class, "Progman" | "WorkerW" | "Shell_TrayWnd" | "CabinetWClass" | "ExploreWClass") {
+    if matches!(
+        class,
+        "Progman"
+            | "WorkerW"
+            | "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "CabinetWClass"
+            | "ExploreWClass"
+            | "XamlExplorerHostIslandWindow"
+    ) {
         return false;
     }
     let p = process.to_ascii_lowercase();
-    !matches!(p.as_str(), "snippingtool" | "screenclippinghost" | "screensketch")
+    !matches!(
+        p.as_str(),
+        "snippingtool"
+            | "screenclippinghost"
+            | "screensketch"
+            | "searchhost"
+            | "startmenuexperiencehost"
+            | "shellexperiencehost"
+            | "widgets"
+    )
 }
 
 /// The keyboard layout (LANGID) of the window in front's thread.

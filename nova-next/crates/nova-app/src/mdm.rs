@@ -643,9 +643,22 @@ pub fn resolve_url(req: &Value, passive: bool) -> Option<String> {
         return Some(ensure_https(u));
     }
 
-    // 2. SMTC app & title match
+    // 2. Prefer foreground browser window first when the user is actively browsing a different browser
+    //    than a stale SMTC session (or SMTC hasn't switched yet).
+    let (fg_proc, _) = nova_sys::win::foreground_info();
+    let fg_proc_l = fg_proc.to_lowercase();
+    let fg_is_browser = ["chrome", "msedge", "edge", "brave", "opera", "vivaldi"].iter().any(|b| fg_proc_l.contains(b));
     let app_id = req["app"].as_str().unwrap_or("");
-    if let Some(proc) = crate::mini::browser_proc(app_id) {
+    let smtc_proc = crate::mini::browser_proc(app_id);
+    if fg_is_browser && smtc_proc.is_some_and(|p| !fg_proc_l.contains(p)) {
+        let r: Value = serde_json::from_str(&nova_sys::yturl::yt_url_opts(&fg_proc, "", false)).unwrap_or_default();
+        if let Some(u) = r["url"].as_str().filter(|s| !s.trim().is_empty()) {
+            return Some(ensure_https(u));
+        }
+    }
+
+    // 3. SMTC app & title match (foreground browser video URL still takes precedence inside yturl::find)
+    if let Some(proc) = smtc_proc {
         let title = req["title"].as_str().unwrap_or("");
         let short: String = title.chars().take(200).collect();
         let r: Value = serde_json::from_str(&nova_sys::yturl::yt_url_opts(proc, &short, !passive)).unwrap_or_default();
@@ -658,10 +671,8 @@ pub fn resolve_url(req: &Value, passive: bool) -> Option<String> {
         return None;
     }
 
-    // 3. Fallback (explicit click only): foreground window if it is a browser
-    let (fg_proc, _) = nova_sys::win::foreground_info();
-    let fg_proc_l = fg_proc.to_lowercase();
-    if ["chrome", "msedge", "edge", "brave", "opera", "vivaldi"].iter().any(|b| fg_proc_l.contains(b)) {
+    // 4. Fallback (explicit click only): foreground window if it is a browser
+    if fg_is_browser {
         let r: Value = serde_json::from_str(&nova_sys::yturl::yt_url_opts(&fg_proc, "", false)).unwrap_or_default();
         if let Some(u) = r["url"].as_str().filter(|s| !s.trim().is_empty()) {
             return Some(ensure_https(u));

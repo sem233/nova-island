@@ -1,10 +1,8 @@
-//! (1.8.7) The adhan's sound: Settings › Prayer & Dhikr › "Adhan sound" plays it with the prayer
-//! alert (pages/views/adhan.js), and the alert lasts as long as the adhan. Two of them: the Fajr
-//! adhan ("الصلاة خير من النوم") and the one for the other prayers. Each is Nova's own
-//! (pages/sounds/adhan.mp3, adhan-fajr.mp3) unless one is chosen; a chosen one is copied into
-//! Nova's data folder as adhan-custom.<ext> / adhan-fajr-custom.<ext>, its original name in the
-//! .txt beside it. Without a Fajr file of its own, Fajr uses the other one. The pages play
-//! https://nova.island/adhan-audio and /adhan-fajr-audio, which nova-web answers from here.
+//! (1.8.7 / 1.8.15) The adhan's sound: Settings › Prayer & Dhikr › "Adhan sound" plays it with the
+//! prayer alert (pages/views/adhan.js), and the alert lasts as long as the adhan. Supports both
+//! local user audio files and one-click curated online Adhans cached locally on disk (zero ongoing
+//! network or RAM usage once downloaded). The pages play https://nova.island/adhan-audio and
+//! /adhan-fajr-audio, which nova-web answers from here.
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
@@ -12,6 +10,79 @@ use serde_json::{json, Value};
 const EXTS: &[&str] = &["mp3", "m4a", "ogg", "opus", "wav", "aac"];
 /// a few minutes of audio is well under this
 const MAX_BYTES: u64 = 30 * 1024 * 1024;
+const MIN_MP3_BYTES: usize = 8 * 1024;
+
+pub struct AdhanPreset {
+    pub id: &'static str,
+    pub en: &'static str,
+    pub ar: &'static str,
+    pub url: &'static str,
+    pub fajr_only: bool,
+}
+
+/// Curated public-domain / open-source Adhan MP3 recordings (downloaded once on user demand).
+pub const PRESETS: &[AdhanPreset] = &[
+    AdhanPreset {
+        id: "makkah",
+        en: "Makkah (Al-Haram)",
+        ar: "أذان الحرم المكي (مكة)",
+        url: "https://raw.githubusercontent.com/abodehq/Athan-MP3/master/Sounds/Athan%20Makkah.mp3",
+        fajr_only: false,
+    },
+    AdhanPreset {
+        id: "alafasy",
+        en: "Mishary Rashid Alafasy",
+        ar: "مشاري راشد العفاسي",
+        url: "https://raw.githubusercontent.com/abodehq/Athan-MP3/master/Sounds/Athan%20Mishary%20Alafasi.mp3",
+        fajr_only: false,
+    },
+    AdhanPreset {
+        id: "abdulbasit",
+        en: "Abdul Basit Abdus Samad",
+        ar: "عبد الباسط عبد الصمد",
+        url: "https://raw.githubusercontent.com/abodehq/Athan-MP3/master/Sounds/Athan%20Abed%20Albase6.mp3",
+        fajr_only: false,
+    },
+    AdhanPreset {
+        id: "refaat",
+        en: "Sheikh Muhammad Refaat",
+        ar: "الشيخ محمد رفعت",
+        url: "https://raw.githubusercontent.com/abodehq/Athan-MP3/master/Sounds/Athan%20Mohammad%20Ref3at.mp3",
+        fajr_only: false,
+    },
+    AdhanPreset {
+        id: "minshawi",
+        en: "Muhammad Siddiq Al-Minshawi",
+        ar: "محمد صديق المنشاوي",
+        url: "https://raw.githubusercontent.com/abodehq/Athan-MP3/master/Sounds/Athan%20Mohammad%20Almenshawy.mp3",
+        fajr_only: false,
+    },
+    AdhanPreset {
+        id: "qatami",
+        en: "Nasser Al-Qatami",
+        ar: "ناصر القطامي",
+        url: "https://raw.githubusercontent.com/abodehq/Athan-MP3/master/Sounds/Athan%20Nasser%20Alqatami.mp3",
+        fajr_only: false,
+    },
+    AdhanPreset {
+        id: "fajr_malek",
+        en: "Fajr Adhan (Malek Chebae)",
+        ar: "أذان الفجر (مالك شيبة)",
+        url: "https://raw.githubusercontent.com/abodehq/Athan-MP3/master/Sounds/Athan%20Al-fajer%20-%20Malek%20chebae.mp3",
+        fajr_only: true,
+    },
+];
+
+pub fn find_preset(id: &str) -> Option<&'static AdhanPreset> {
+    PRESETS.iter().find(|p| p.id == id)
+}
+
+pub fn looks_like_mp3(bytes: &[u8]) -> bool {
+    if bytes.len() < MIN_MP3_BYTES || (bytes.len() as u64) > MAX_BYTES {
+        return false;
+    }
+    bytes.starts_with(b"ID3") || (bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0)
+}
 
 /// "fajr" or the others ("")
 fn stem(fajr: bool) -> &'static str {
@@ -34,14 +105,25 @@ pub fn apply() {
 }
 
 fn one(fajr: bool) -> Value {
-    let name = custom(fajr).map(|_| std::fs::read_to_string(crate::data_dir().join(format!("{}.txt", stem(fajr)))).unwrap_or_else(|_| "adhan".into()));
+    let dir = crate::data_dir();
+    let has_custom = custom(fajr).is_some();
+    let name = has_custom.then(|| std::fs::read_to_string(dir.join(format!("{}.txt", stem(fajr)))).unwrap_or_else(|_| "adhan".into()));
+    let preset = has_custom
+        .then(|| std::fs::read_to_string(dir.join(format!("{}.preset", stem(fajr)))).ok())
+        .flatten()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let own = nova_assets::get(if fajr { "sounds/adhan-fajr.mp3" } else { "sounds/adhan.mp3" }).is_some();
-    json!({ "name": name, "custom": name.is_some(), "hasDefault": own })
+    json!({ "name": name, "custom": has_custom, "hasDefault": own, "preset": preset })
 }
 
-/// {main: {name, custom, hasDefault}, fajr: {...}} for Settings.
+/// {main, fajr, presets} for Settings.
 pub fn info() -> Value {
-    json!({ "main": one(false), "fajr": one(true) })
+    let presets: Vec<Value> = PRESETS
+        .iter()
+        .map(|p| json!({ "id": p.id, "en": p.en, "ar": p.ar, "fajrOnly": p.fajr_only }))
+        .collect();
+    json!({ "main": one(false), "fajr": one(true), "presets": presets })
 }
 
 fn clear(fajr: bool) {
@@ -50,6 +132,41 @@ fn clear(fajr: bool) {
         let _ = std::fs::remove_file(dir.join(format!("{}.{e}", stem(fajr))));
     }
     let _ = std::fs::remove_file(dir.join(format!("{}.txt", stem(fajr))));
+    let _ = std::fs::remove_file(dir.join(format!("{}.preset", stem(fajr))));
+}
+
+/// Downloads an allowlisted online Adhan preset once and caches it locally in Nova's data folder.
+pub fn download_preset(fajr: bool, preset_id: &str) -> Value {
+    let Some(p) = find_preset(preset_id) else {
+        return json!({ "error": "unknown" });
+    };
+    let resp = match nova_core::http::get(p.url, 30_000) {
+        Ok(r) if r.ok() => r,
+        Ok(r) => {
+            nova_core::log::warn(&format!("adhan preset {} HTTP {}", p.id, r.status));
+            return json!({ "error": "network" });
+        }
+        Err(e) => {
+            nova_core::log::warn(&format!("adhan preset {} failed: {e}", p.id));
+            return json!({ "error": "network" });
+        }
+    };
+    if !looks_like_mp3(&resp.body) {
+        return json!({ "error": "type" });
+    }
+    let dir = crate::data_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    clear(fajr);
+    let dest = dir.join(format!("{}.mp3", stem(fajr)));
+    if std::fs::write(&dest, &resp.body).is_err() {
+        clear(fajr);
+        return json!({ "error": "copy" });
+    }
+    let _ = std::fs::write(dir.join(format!("{}.txt", stem(fajr))), p.en);
+    let _ = std::fs::write(dir.join(format!("{}.preset", stem(fajr))), p.id);
+    nova_core::log::info(&format!("adhan: downloaded preset {} ({})", p.id, if fajr { "fajr" } else { "main" }));
+    apply();
+    json!({ "ok": true, "id": p.id, "name": p.en })
 }
 
 /// Takes a file the user picked: {ok} or {error}.
@@ -79,4 +196,32 @@ pub fn set_file(fajr: bool, path: &str) -> Value {
 pub fn reset(fajr: bool) {
     clear(fajr);
     apply();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preset_lookup_only_matches_allowlisted_ids() {
+        assert!(find_preset("makkah").is_some());
+        assert!(find_preset("alafasy").is_some());
+        assert!(find_preset("fajr_malek").is_some());
+        assert!(find_preset("https://evil.example/x.mp3").is_none());
+        assert!(find_preset("").is_none());
+    }
+
+    #[test]
+    fn mp3_validation_checks_size_and_header() {
+        let mut valid = vec![0u8; MIN_MP3_BYTES + 128];
+        valid[0..3].copy_from_slice(b"ID3");
+        assert!(looks_like_mp3(&valid));
+        let mut frame = vec![0u8; MIN_MP3_BYTES + 128];
+        frame[0] = 0xFF;
+        frame[1] = 0xFB;
+        assert!(looks_like_mp3(&frame));
+        assert!(!looks_like_mp3(b"ID3tiny"));
+        let html = vec![b'<'; MIN_MP3_BYTES + 128];
+        assert!(!looks_like_mp3(&html));
+    }
 }

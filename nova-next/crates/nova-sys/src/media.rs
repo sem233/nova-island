@@ -40,7 +40,54 @@ pub fn manager() -> Option<Manager> {
 }
 
 pub fn current(mgr: Option<&Manager>) -> Option<Session> {
-    mgr?.GetCurrentSession().ok()
+    current_for(mgr, "")
+}
+
+/// Checks whether an SMTC `SourceAppUserModelId` belongs to the foreground process name.
+fn app_matches_fg(app_id: &str, fg_proc: &str) -> bool {
+    if fg_proc.is_empty() || app_id.is_empty() {
+        return false;
+    }
+    let a = app_id.to_ascii_lowercase();
+    let f = fg_proc.to_ascii_lowercase();
+    a.contains(&f)
+        || (f == "msedge" && a.contains("edge"))
+        || (f == "firefox" && a == "308046b0af4a39cb")
+}
+
+/// Selects the best active media session across all open SMTC sessions:
+/// 1) A currently `Playing` session ALWAYS beats a stale `Paused`/`Stopped` session.
+/// 2) Among tied sessions, prefers one matching the foreground process (`fg_proc`),
+///    then Windows' `GetCurrentSession()`, then the most recently updated timeline.
+pub fn current_for(mgr: Option<&Manager>, fg_proc: &str) -> Option<Session> {
+    let mgr = mgr?;
+    let cur = mgr.GetCurrentSession().ok();
+    let cur_id = cur.as_ref().and_then(|s| s.SourceAppUserModelId().ok()).map(|h| h.to_string_lossy());
+    let Ok(sessions) = mgr.GetSessions() else {
+        return cur;
+    };
+    let n = sessions.Size().unwrap_or(0);
+    if n <= 1 {
+        return cur.or_else(|| (n == 1).then(|| sessions.GetAt(0).ok()).flatten());
+    }
+    let mut best: Option<((u8, u8, u8, i64), Session)> = None;
+    for i in 0..n {
+        let Ok(s) = sessions.GetAt(i) else { continue };
+        let is_play = u8::from(playing(&s));
+        let app_id = s.SourceAppUserModelId().map(|h| h.to_string_lossy()).unwrap_or_default();
+        let is_fg = u8::from(app_matches_fg(&app_id, fg_proc));
+        let is_cur = u8::from(cur_id.as_deref() == Some(app_id.as_str()));
+        let updated = s
+            .GetTimelineProperties()
+            .and_then(|tl| tl.LastUpdatedTime())
+            .map(|t| t.UniversalTime)
+            .unwrap_or(0);
+        let rank = (is_play, is_fg, is_cur, updated);
+        if best.as_ref().is_none_or(|(b, _)| rank > *b) {
+            best = Some((rank, s));
+        }
+    }
+    best.map(|(_, s)| s).or(cur)
 }
 
 /// The session of one app (its AppUserModelId), for the mini player hand-off.

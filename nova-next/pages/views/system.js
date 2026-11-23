@@ -23,57 +23,47 @@
     return 'rain';
   }
 
+  function hideWeather() {
+    for (const el of [$('#wx-mini'), $('#i-wx'), $('#v-wx')]) {
+      if (el) el.hidden = true;
+    }
+  }
+
   function renderWeather(w) {
-    if (!w) return;
+    if (!w || !feat('weather')) {
+      hideWeather();
+      return;
+    }
     const kind = wxKind(w.code, w.isDay);
     const info = WX[kind];
     const card = $('#wx-card');
-    card.classList.toggle('night', !w.isDay);
-    card.classList.toggle('cloudy', ['cloud', 'fog', 'rain', 'snow', 'storm'].includes(kind));
-    $('#wx-ico').innerHTML = info.svg;
-    $('#wx-temp').textContent = `${w.temp}°`;
-    $('#wx-desc').textContent = info.label;
-    $('#wx-meta').textContent = `${w.city ? `${w.city} · ` : ''}H ${w.hi}° L ${w.lo}°`;
+    if (card) {
+      card.classList.toggle('night', !w.isDay);
+      card.classList.toggle('cloudy', ['cloud', 'fog', 'rain', 'snow', 'storm'].includes(kind));
+      $('#wx-ico').innerHTML = info.svg;
+      $('#wx-temp').textContent = `${w.temp}°`;
+      $('#wx-desc').textContent = info.label;
+      $('#wx-meta').textContent = `${w.city ? `${w.city} · ` : ''}H ${w.hi}° L ${w.lo}°`;
+    }
     const mini = $('#wx-mini');
-    mini.hidden = false;
-    mini.querySelector('svg').innerHTML = info.svg;
-    mini.querySelector('b').textContent = `${w.temp}°`;
-    mini.title = `${info.label}${w.city ? ` in ${w.city}` : ''}`;
+    if (mini) {
+      mini.hidden = false;
+      mini.querySelector('svg').innerHTML = info.svg;
+      mini.querySelector('b').textContent = `${w.temp}°`;
+      mini.title = `${info.label}${w.city ? ` in ${w.city}` : ''}`;
+    }
     for (const pill of [$('#i-wx'), $('#v-wx')]) {
+      if (!pill) continue;
       pill.hidden = false;
       pill.querySelector('svg').innerHTML = info.svg;
       pill.querySelector('b').textContent = `${w.temp}°`;
     }
   }
+  window.addEventListener('island:features', () => { if (!feat('weather')) hideWeather(); });
 
-  function meter(bar, val, v) {
-    const pct = Math.round(v * 100);
-    const w = `${pct}%`;
-    if (bar.style.width !== w) bar.style.width = w;
-    const warn = v >= 0.7 && v < 0.9;
-    const hot = v >= 0.9;
-    if (bar.classList.contains('warn') !== warn) bar.classList.toggle('warn', warn);
-    if (bar.classList.contains('hot') !== hot) bar.classList.toggle('hot', hot);
-    const t = w;
-    if (val.textContent !== t) val.textContent = t;
-  }
-
-  let lastStats = null;
-  function renderStats(s = lastStats) {
-    if (!s || lastMode !== 'expanded' || state.tab !== 'system') return;
-    meter($('#cpu-bar'), $('#cpu-val'), s.cpu);
-    meter($('#ram-bar'), $('#ram-val'), s.ram);
-    const title = `${(s.ramUsed / 2 ** 30).toFixed(1)} / ${(s.ramTotal / 2 ** 30).toFixed(1)} GB`;
-    const ramVal = $('#ram-val');
-    if (ramVal.title !== title) ramVal.title = title;
-  }
-
-  bridge.onStats((s) => {
-    lastStats = s;
-    renderStats(s);
-  });
-  window.addEventListener('island:mode', (e) => { if (e.detail?.mode === 'expanded') renderStats(); });
-  window.addEventListener('island:tab', (e) => { if (e.detail?.tab === 'system') renderStats(); });
+  // Expanded System tab is dedicated to Clipboard history; CPU/RAM stays on the awake idle pill
+  // (renderer.js) so opening this tab does zero redundant meter layout work.
+  function renderStats() {}
 
   // Clipboard history (1.8): pinned clips first and kept, each clip one line; the full view shows
   // a long or many-line clip whole, to read, copy or pin. Click a line to copy it, as in 1.7.

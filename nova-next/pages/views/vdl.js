@@ -23,9 +23,13 @@
     return window.state || { media: { has: false } };
   }
 
+  const BROWSERS = ['chrome', 'msedge', 'edge', 'brave', 'opera', 'vivaldi', 'firefox'];
   function trackKeyOf(m) {
     if (!m || !m.has) return '';
-    return `${m.title || ''}|${m.artist || ''}|${m.app || ''}`;
+    const dur = m.dur > 0 ? Math.round(m.dur) : 0;
+    const fgProc = String(m.fgProc || '').toLowerCase();
+    const fgKey = BROWSERS.some((b) => fgProc.includes(b)) ? `${fgProc}:${m.fgTitle || ''}` : '';
+    return `${m.title || ''}|${m.artist || ''}|${m.app || ''}|${dur}|${fgKey}`;
   }
 
   function doRender() {
@@ -182,6 +186,8 @@
     const req = {
       app: m?.app || '',
       title: m?.title || '',
+      fgProc: m?.fgProc || '',
+      fgTitle: m?.fgTitle || '',
       passive: !!passive,
     };
     const slot = { key, seq, passive: !!passive, promise: null };
@@ -314,20 +320,11 @@
       const key = lastTrackKey;
       const seq = probeSeq;
 
-      if (
-        vdlProbeData &&
-        vdlProbeKey === key &&
-        Array.isArray(vdlProbeData.choices) &&
-        vdlProbeData.choices.length &&
-        Date.now() - vdlProbeTime < 300000
-      ) {
-        openVdlPicker(vdlProbeData);
-        return;
-      }
-
+      // Always resolve live browser URL via backend probe (hits instant Rust PROBE_CACHE when URL is
+      // unchanged, and immediately probes the new video whenever the user switched videos in-tab).
       vdlWantsOpenAfterProbe = true;
       vdlBtn.classList.add('busy');
-      vdlShow('جاري البحث عن الجودات…', '', 0);
+      vdlShow('جاري التحقق من الفيديو الحالي…', '', 0);
       doRender();
 
       const res = await runProbe(m, key, seq, false);
@@ -343,6 +340,7 @@
         const mode = typeof window.currentMode === 'function' ? window.currentMode() : 'expanded';
         if (mode === 'expanded') {
           openVdlPicker(res);
+          if (res.title) vdlShow(`اختر الجودة · ${String(res.title).slice(0, 42)}`, '', 0);
         } else {
           notifyQualitiesReady(res, key, seq);
         }

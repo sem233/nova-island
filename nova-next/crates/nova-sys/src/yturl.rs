@@ -243,21 +243,23 @@ fn find(proc: &str, title: &str, allow_tab_switch: bool) -> String {
     let Ok(cls) = (unsafe { u.a.CreatePropertyCondition(UIA_ClassNamePropertyId, &VARIANT::from(BSTR::from("Chrome_WidgetWin_1"))) }) else {
         return json("", "not-found");
     };
-    let mut windows: Vec<(IUIAutomationElement, String)> = u
+    let fg_hwnd = crate::win::foreground().0 as isize;
+    let mut windows: Vec<(IUIAutomationElement, String, bool)> = u
         .all(&root, TreeScope_Children, &cls)
         .into_iter()
         .filter(|w| unsafe { w.CurrentProcessId() }.is_ok_and(|p| pids.contains(&(p as u32))))
         .map(|w| {
             let n = name(&w);
-            (w, n)
+            let hwnd = unsafe { w.CurrentNativeWindowHandle().map(|h| h.0 as isize).unwrap_or(0) };
+            (w, n, hwnd != 0 && hwnd == fg_hwnd)
         })
-        .filter(|(_, n)| !n.is_empty())
+        .filter(|(_, n, _)| !n.is_empty())
         .collect();
-    // windows whose title contains the video title first
-    windows.sort_by_key(|(_, n)| if title_matches(n, &want) { 0 } else { 1 });
+    // windows whose title matches first; break ties in favor of the foreground browser window
+    windows.sort_by_key(|(_, n, is_fg)| (if title_matches(n, &want) { 0 } else { 1 }, if *is_fg { 0 } else { 1 }));
 
     // 1. Check active windows whose title matches (or when no title filter was requested)
-    for (w, n) in &windows {
+    for (w, n, _) in &windows {
         let matched = title_matches(n, &want);
         if matched || want.is_empty() {
             let url = u.url_of(w);
@@ -267,9 +269,20 @@ fn find(proc: &str, title: &str, allow_tab_switch: bool) -> String {
         }
     }
 
+    // 1b. If the user is actively viewing a video page in the foreground browser window (e.g.
+    // navigated to a second video while SMTC still reports the previous video's title), prefer
+    // the live foreground video URL over jumping to a stale background tab.
+    if let Some((w, _, _)) = windows.iter().find(|(_, _, is_fg)| *is_fg) {
+        let url = u.url_of(w);
+        let l = url.to_ascii_lowercase();
+        if is_known_video(&url) || (is_web_url(&url) && (l.contains("/watch") || l.contains("/embed") || l.contains("/episode") || l.contains("/movie"))) {
+            return json(&url, "foreground-video");
+        }
+    }
+
     // 2. If allowed, check background tabs matching title BEFORE falling back to an unrelated active tab
     if allow_tab_switch && !want.is_empty() {
-        for (w, _) in &windows {
+        for (w, _, _) in &windows {
             let tabs = u.tabs_of(w);
             let Some(target) = tabs.iter().find(|t| title_matches(&name(t), &want)) else { continue };
             let prev = tabs.iter().find(|t| selected(t));
@@ -294,14 +307,14 @@ fn find(proc: &str, title: &str, allow_tab_switch: bool) -> String {
     }
 
     // 3. Check if an active window is already on a known video site (e.g. TikTok/Reels where tab title differs from media)
-    for (w, _) in &windows {
+    for (w, _, _) in &windows {
         let url = u.url_of(w);
         if is_known_video(&url) {
             return json(&url, "address-bar");
         }
     }
 
-    // 3. Final active-tab fallback ONLY if allow_tab_switch (user explicitly clicked) & only 1 window
+    // 4. Final active-tab fallback ONLY if allow_tab_switch (user explicitly clicked) & only 1 window
     if allow_tab_switch && windows.len() == 1 {
         let url = u.url_of(&windows[0].0);
         if is_web_url(&url) {

@@ -61,7 +61,77 @@ html.i18n-wait body { visibility: hidden; }
 #update-check-row[data-tone="bad"] small { color: #ff8a80; }
 
 /* (1.8.7) the adhan's file */
-#adhan-row .adhan-btns, .adhan-row .adhan-btns { display: flex; gap: 6px; flex: none; }
-#adhan-name, .adhan-row .adhan-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; display: block; }
+#adhan-row .adhan-btns, .adhan-row .adhan-btns { display: flex; gap: 6px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
+#adhan-name, .adhan-row .adhan-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; display: block; }
 /* (1.8.7) a feature that isn't out yet */
 .row.soon { opacity: .55; cursor: default; }
+
+/* (1.8.15) Prayer alert sound & online Adhan controls: branded base-select progressive enhancement */
+.row.adhan-row { flex-wrap: wrap; row-gap: 8px; }
+.adhan-online {
+  flex: 1 0 100%;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+}
+.adhan-online-lbl { font-size: 12px; color: var(--text-3); margin-inline-end: auto; }
+.pr-sound-ctl { display: flex; align-items: center; gap: 8px; flex: none; }
+.row-lbl { font-size: 13.5px; font-weight: 450; color: var(--text-2); }
+
+.pr-select {
+  min-width: 164px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  background: #1c1e28;
+  color: #f2f4f8;
+  font: 500 12.5px var(--font);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: border-color .15s, background .15s;
+}
+.pr-select:hover { border-color: rgba(255, 255, 255, .44); background: #232635; }
+.pr-select:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pr-select option { background: #181a24; color: #f2f4f8; }
+
+@supports (appearance: base-select) {
+  .pr-select, .pr-select::picker(select) {
+    appearance: base-select;
+  }
+  .pr-select::picker-icon {
+    color: rgba(242, 244, 248, .78);
+    transition: rotate .18s ease;
+  }
+  .pr-select:open::picker-icon {
+    rotate: 180deg;
+  }
+  .pr-select::picker(select) {
+    background: #171923;
+    color: #f2f4f8;
+    border: 1px solid rgba(255, 255, 255, .24);
+    border-radius: 10px;
+    padding: 4px;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, .58);
+  }
+  .pr-select option {
+    padding: 6px 10px;
+    border-radius: 7px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pr-select option:hover, .pr-select option:focus-visible {
+    background: rgba(111, 140, 255, .22);
+    color: #fff;
+  }
+  .pr-select option:checked {
+    background: rgba(111, 140, 255, .32);
+    color: #fff;
+    font-weight: 600;
+  }
+  .pr-select option::checkmark {
+    color: #9bb0ff;
+    font-size: 12px;
+  }
+}

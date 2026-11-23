@@ -249,3 +249,36 @@ body[data-theme="nody"] #net-ping[data-grade="bad"], body[data-theme="nody"] #i-
 .scene-card .sc-adhan svg { width: 15px; height: 15px; }
 .scene-card .sc-adhan:hover { background: rgba(255, 255, 255, .18); }
 .scene-card .sc-adhan.on { background: rgba(251, 191, 36, .25); color: #fcd34d; }
+
+/* (1.8.15) Expanded System tab is dedicated cleanly to Clipboard history; CPU/RAM stays on the awake idle pill */
+#v-system .sys { grid-template-columns: 1fr; }
+#v-system #wx-card, #v-system .meters { display: none; }
+
+/* (1.8.15) Universal Island Pin button in the expanded topbar (views/topbar-pin.js) */
+.topbar .pin-btn { transition: background var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast); }
+.topbar .pin-btn:hover { transform: none; }
+.topbar .pin-btn.active {
+  background: rgba(var(--accent-rgb), .24);
+  color: rgb(var(--accent-rgb));
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .48);
+}
+.topbar .pin-btn.active svg { fill: currentColor; }
+.topbar .pin-btn:focus-visible, .presets .sw-btn:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), .9);
+  outline-offset: 2px;
+}
+
+/* (1.8.15) Timer tab: Focus and Stopwatch sit neatly side-by-side under the presets */
+.presets .focus-btn { grid-column: 1 / span 2; }
+.presets .sw-btn {
+  grid-column: 3 / span 2;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; padding: 0 10px; border-radius: 99px;
+  background: rgba(var(--accent-rgb), .16); color: rgb(var(--accent-rgb));
+  font-size: 12.5px; font-weight: 700;
+  transition: background var(--dur-fast), color var(--dur-fast), transform .25s var(--spring);
+}
+.presets .sw-btn svg { width: 14px; height: 14px; flex: none; }
+.presets .sw-btn:hover { background: rgba(var(--accent-rgb), .26); }
+.presets .sw-btn:active { transform: scale(.94); }
+.presets .sw-btn.sel { background: rgb(var(--accent-rgb)); color: #08121f; }

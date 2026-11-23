@@ -183,7 +183,11 @@ impl System {
     pub fn new(ctx: Ctx) -> Arc<System> {
         let store = ctx.store();
         let now = now_ms();
-        let weather = store.load("weather-cache.json").filter(|s| now - s["at"].as_f64().unwrap_or(0.0) < WEATHER_FRESH).map(|s| s["weather"].clone());
+        let weather = if ctx.on("weather") {
+            store.load("weather-cache.json").filter(|s| now - s["at"].as_f64().unwrap_or(0.0) < WEATHER_FRESH).map(|s| s["weather"].clone())
+        } else {
+            None
+        };
         let pins: Vec<String> = store.load(PINS_FILE).and_then(|v| v.as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(str::to_string)).take(MAX_PINS).collect())).unwrap_or_default();
         let (clips, history_changed) = if clip_persist_from(&ctx) {
             load_history(&store, &pins, clip_max_from(&ctx), clip_expire_ms_from(&ctx), now)
@@ -212,11 +216,23 @@ impl System {
     pub fn start(self: &Arc<Self>) {
         let me = self.clone();
         std::thread::spawn(move || me.stats_loop());
-        if let Some(w) = self.st.lock().unwrap().weather.clone() {
-            self.ctx.send("weather", w); // the saved one, until a fresh one arrives
+        if self.ctx.on("weather") {
+            if let Some(w) = self.st.lock().unwrap().weather.clone() {
+                self.ctx.send("weather", w); // the saved one, until a fresh one arrives
+            }
         }
         let me = self.clone();
         std::thread::spawn(move || me.weather_loop());
+    }
+
+    /// Toggles weather fetching cleanly at runtime without wasting CPU/network when disabled.
+    pub fn weather_settings_changed(&self) {
+        if self.ctx.on("weather") {
+            self.weather_wake.wake();
+        } else {
+            self.st.lock().unwrap().weather = None;
+            self.ctx.send("weather", Value::Null);
+        }
     }
 
     // ---- CPU / RAM ----
@@ -585,6 +601,11 @@ impl System {
 
     fn weather_loop(&self) {
         loop {
+            if !self.ctx.on("weather") {
+                // Dormant until the user explicitly turns Weather on in Settings.
+                self.weather_wake.sleep(60 * 60 * 1000);
+                continue;
+            }
             let wait = match self.fetch_weather() {
                 Ok(()) => {
                     let mut st = self.st.lock().unwrap();

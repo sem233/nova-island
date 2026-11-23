@@ -549,6 +549,155 @@ const PATCHES: &[(&str, &str, &str)] = &[
   <script src="views/adhan.js"></script>
 "##),
     ("index.html", "https://qurango.net https://*.qurango.net https://cdn.mp3quran.net", "https://qurango.net https://*.qurango.net https://cdn.mp3quran.net 'self'"),
+    // (1.8.15) On-demand screenshot pin IPC + online Adhan downloader IPC
+    (
+        "preload.js",
+        "  onCalcClose: on('calc-close'),\n",
+        "  onCalcClose: on('calc-close'),\n  shotPin: () => ipcRenderer.send('shot-pin'),\n",
+    ),
+    (
+        "prefs/preload.js",
+        "  adhanReset: (which) => ipcRenderer.invoke('adhan-reset', which),\n",
+        "  adhanReset: (which) => ipcRenderer.invoke('adhan-reset', which),\n  adhanDownload: (which, preset) => ipcRenderer.invoke('adhan-download', which, preset),\n",
+    ),
+    // (1.8.15) Expanded System tab becomes dedicated Clipboard tab; universal Pin button in topbar;
+    // Stopwatch, Prayer alert chimes & Iqama alerts scripts
+    (
+        "index.html",
+        "            <button role=\"tab\" data-tab=\"system\" class=\"tab\" aria-label=\"System\">\n              <svg class=\"s\" viewBox=\"0 0 24 24\"><path d=\"M22 12h-4l-3 9L9 3l-3 9H2\"/></svg><span>System</span>\n            </button>\n",
+        "            <button role=\"tab\" data-tab=\"system\" class=\"tab\" aria-label=\"Clipboard\">\n              <svg class=\"s\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\"/><path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\"/></svg><span>Clipboard</span>\n            </button>\n",
+    ),
+    (
+        "index.html",
+        "            <button class=\"gear calc-btn\" id=\"open-calc\"",
+        "            <button type=\"button\" class=\"gear pin-btn\" id=\"pin-island\" title=\"Pin island open\" aria-label=\"Pin island open\" aria-pressed=\"false\"><svg class=\"s\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><line x1=\"12\" y1=\"17\" x2=\"12\" y2=\"22\"/><path d=\"M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a1 1 0 0 0 0-2H8a1 1 0 0 0 0 2h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z\"/></svg></button>\n            <button class=\"gear calc-btn\" id=\"open-calc\"",
+    ),
+    (
+        "index.html",
+        "  <script src=\"views/adhan.js\"></script>\n",
+        "  <script src=\"views/adhan.js\"></script>\n  <script src=\"prayer-sounds.js\"></script>\n  <script src=\"views/prayer-alerts.js\"></script>\n  <script src=\"views/stopwatch.js\"></script>\n  <script src=\"views/topbar-pin.js\"></script>\n",
+    ),
+    // (1.8.15) Compact pill shows live Stopwatch; expanded edge bounds union stops premature collapse;
+    // media track key includes rounded duration so consecutive short browser videos refresh cleanly
+    (
+        "renderer.js",
+        "function timerActive() {\n  return state.timer.running || state.timer.remaining > 0;\n}",
+        "function timerActive() {\n  return state.timer.running || state.timer.remaining > 0 || !!window.stopwatchActive?.();\n}",
+    ),
+    (
+        "renderer.js",
+        "  let r = island.getBoundingClientRect();\n  // during a scene the card beside the character must take the mouse too\n",
+        "  let r = island.getBoundingClientRect();\n  if (lastMode === 'expanded') {\n    const tx = parseFloat(island.style.getPropertyValue('--x'));\n    const ty = parseFloat(island.style.getPropertyValue('--y'));\n    if (!Number.isNaN(tx) && !Number.isNaN(ty)) {\n      const [tw, th] = (anchor.vertical ? VDIMS : DIMS).expanded;\n      const left = Math.min(r.left, tx);\n      const top = Math.min(r.top, ty);\n      r = { left, top, width: Math.max(r.right, tx + tw) - left, height: Math.max(r.bottom, ty + th) - top };\n    }\n  }\n  // during a scene the card beside the character must take the mouse too\n",
+    ),
+    (
+        "renderer.js",
+        "  const key = m.has ? `${m.title}|${m.artist}|${m.app}` : null;\n",
+        "  const key = m.has ? `${m.title}|${m.artist}|${m.app}|${Math.round(m.dur || 0)}` : null;\n",
+    ),
+    // (1.8.15) Replace fixed 10-min pre-prayer alert with customizable pre-prayer & iqama alerts
+    (
+        "views/prayer.js",
+        "      } else if (diff > 0 && diff <= SOON_MIN * 60000 && diff > (SOON_MIN - 1) * 60000 && !fired.has(`${id}-soon`)) {\n        fired.add(`${id}-soon`);\n        showToast('prayer-soon', `${NAMES[k]} بعد ${SOON_MIN} دقائق`, clock(t), 0, 5000);\n      }\n    }\n  }\n",
+        "      }\n    }\n    window.prayerExtraRemind?.(d, now, at, clock, NAMES, fired);\n  }\n",
+    ),
+    // (1.8.15) Settings: Clipboard tab label, optional Weather toggle (default off), screenshot Pin toast vs auto-pin,
+    // customizable pre-prayer & iqama alerts + sound preview + curated online Adhan downloads
+    (
+        "prefs/index.html",
+        "            <label class=\"chip\"><input type=\"checkbox\" data-feature=\"tabSystem\" data-tab><svg viewBox=\"0 0 24 24\"><path d=\"M22 12h-4l-3 9L9 3l-3 9H2\"/></svg><b>System</b></label>\n",
+        "            <label class=\"chip\"><input type=\"checkbox\" data-feature=\"tabSystem\" data-tab><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\"/><path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\"/></svg><b>Clipboard</b></label>\n",
+    ),
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><b>Clock &amp; weather</b><input type=\"checkbox\" class=\"sw\" data-feature=\"slideClock\"></label>\n",
+        "            <label class=\"row\"><b>Clock</b><input type=\"checkbox\" class=\"sw\" data-feature=\"slideClock\"></label>\n            <label class=\"row\"><div class=\"txt\"><b>Weather</b><small>Optional weather fetch on the idle bar (off by default to save resources)</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"weather\"></label>\n",
+    ),
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><div class=\"txt\"><b>Pin screenshots on screen</b><small>Keep captured regions floating at actual size above apps (PrtScn / Ctrl+Alt+S)</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"shotPinOverlay\"></label>\n",
+        "            <label class=\"row\"><div class=\"txt\"><b>Pin button on screenshot alert</b><small>Show a sleek 5-second alert with a Pin button to float the capture at 1:1 size</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"shotPinOverlay\"></label>\n            <label class=\"row sub\" data-needs=\"shotPinOverlay\"><div class=\"txt\"><b>Auto-pin immediately</b><small>Float every capture automatically without clicking the Pin button</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"shotAutoPin\"></label>\n",
+    ),
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><b>Prayer alerts</b><input type=\"checkbox\" class=\"sw\" data-feature=\"prayerAlerts\"></label>\n",
+        r##"            <label class="row"><b>Prayer alerts</b><input type="checkbox" class="sw" data-feature="prayerAlerts"></label>
+            <div class="row sub" data-needs="prayerAlerts"><b>Remind before prayer</b>
+              <div class="stepper" data-num="prayerSoonMin" data-steps="0,5,10,15,20,30" data-unit="optmin"><button type="button" data-dir="-1" aria-label="Less">−</button><output></output><button type="button" data-dir="1" aria-label="More">+</button></div>
+            </div>
+            <div class="row sub" data-needs="prayerAlerts">
+              <label for="prayer-soon-sound" class="row-lbl">Pre-prayer sound</label>
+              <div class="pr-sound-ctl">
+                <select id="prayer-soon-sound" name="prayerSoonSound" class="pr-select" data-select-feature="prayerSoonSound">
+                  <option value="silent">Silent (visual only)</option>
+                  <option value="bell">Soft Bell</option>
+                  <option value="chime">Warm Chime</option>
+                  <option value="crystal">Crystal Tone</option>
+                  <option value="takbir">Takbir Cadence</option>
+                  <option value="pulse">Gentle Pulse</option>
+                </select>
+                <button type="button" class="btn pr-test" id="test-soon-sound" data-sound-for="prayer-soon-sound">Play</button>
+              </div>
+            </div>
+            <label class="row sub" data-needs="prayerAlerts"><b>Iqama alerts</b><input type="checkbox" class="sw" data-feature="iqamaAlert"></label>
+            <div class="row sub2" data-needs="prayerAlerts iqamaAlert"><b>Iqama after adhan</b>
+              <div class="stepper" data-num="iqamaDelayMin" data-steps="5,10,15,20,25,30" data-unit="min"><button type="button" data-dir="-1" aria-label="Less">−</button><output></output><button type="button" data-dir="1" aria-label="More">+</button></div>
+            </div>
+            <div class="row sub2" data-needs="prayerAlerts iqamaAlert"><b>Remind before iqama</b>
+              <div class="stepper" data-num="iqamaBeforeMin" data-steps="0,1,2,3,5,10" data-unit="iqmin"><button type="button" data-dir="-1" aria-label="Less">−</button><output></output><button type="button" data-dir="1" aria-label="More">+</button></div>
+            </div>
+            <div class="row sub2" data-needs="prayerAlerts iqamaAlert">
+              <label for="iqama-sound" class="row-lbl">Iqama sound</label>
+              <div class="pr-sound-ctl">
+                <select id="iqama-sound" name="iqamaSound" class="pr-select" data-select-feature="iqamaSound">
+                  <option value="silent">Silent (visual only)</option>
+                  <option value="bell">Soft Bell</option>
+                  <option value="chime">Warm Chime</option>
+                  <option value="crystal">Crystal Tone</option>
+                  <option value="takbir">Takbir Cadence</option>
+                  <option value="pulse">Gentle Pulse</option>
+                </select>
+                <button type="button" class="btn pr-test" id="test-iqama-sound" data-sound-for="iqama-sound">Play</button>
+              </div>
+            </div>
+"##,
+    ),
+    (
+        "prefs/index.html",
+        r##"            <div class="row sub adhan-row" data-adhan="main"><div class="txt"><b>Adhan</b><small class="adhan-name">Nova's adhan</small></div>
+              <div class="adhan-btns"><button class="btn adhan-play">Play</button><button class="btn adhan-pick">Choose file</button><button class="btn adhan-reset" hidden>Default</button></div>
+            </div>
+            <div class="row sub adhan-row" data-adhan="fajr"><div class="txt"><b>Fajr adhan</b><small class="adhan-name">Nova's Fajr adhan</small></div>
+              <div class="adhan-btns"><button class="btn adhan-play">Play</button><button class="btn adhan-pick">Choose file</button><button class="btn adhan-reset" hidden>Default</button></div>
+            </div>
+"##,
+        r##"            <div class="row sub adhan-row" data-adhan="main"><div class="txt"><b>Adhan</b><small class="adhan-name">Nova's adhan</small></div>
+              <div class="adhan-btns"><button type="button" class="btn adhan-play">Play</button><button type="button" class="btn adhan-pick">Choose file</button><button type="button" class="btn adhan-reset" hidden>Default</button></div>
+              <div class="adhan-online">
+                <label for="adhan-preset-main" class="adhan-online-lbl">Online adhan</label>
+                <select id="adhan-preset-main" name="adhanPreset" class="pr-select adhan-preset"></select>
+                <button type="button" class="btn accent adhan-dl">Download</button>
+              </div>
+            </div>
+            <div class="row sub adhan-row" data-adhan="fajr"><div class="txt"><b>Fajr adhan</b><small class="adhan-name">Nova's Fajr adhan</small></div>
+              <div class="adhan-btns"><button type="button" class="btn adhan-play">Play</button><button type="button" class="btn adhan-pick">Choose file</button><button type="button" class="btn adhan-reset" hidden>Default</button></div>
+              <div class="adhan-online">
+                <label for="adhan-preset-fajr" class="adhan-online-lbl">Online adhan</label>
+                <select id="adhan-preset-fajr" name="adhanFajrPreset" class="pr-select adhan-preset"></select>
+                <button type="button" class="btn accent adhan-dl">Download</button>
+              </div>
+            </div>
+"##,
+    ),
+    (
+        "prefs/index.html",
+        "  <script src=\"adhan.js\"></script>\n",
+        "  <script src=\"../prayer-sounds.js\"></script>\n  <script src=\"adhan.js\"></script>\n",
+    ),
+    (
+        "prefs/prefs.js",
+        "  if (unit === 'items') return `${n} items`;\n",
+        "  if (unit === 'optmin') return n === 0 ? 'Off' : `${n} min`;\n  if (unit === 'iqmin') return n === 0 ? 'At iqama' : `${n} min`;\n  if (unit === 'items') return `${n} items`;\n",
+    ),
 ];
 
 /// The file's bytes with this file's PATCHES made (each must match exactly once).

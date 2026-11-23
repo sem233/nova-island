@@ -62,6 +62,20 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.15
+
+**Accurate consecutive browser video tracking & downloading** — ranks Windows SMTC sessions by active playback and foreground browser window, includes video duration in change detection, and always re-probes the live foreground browser URL when clicking Download so watching multiple videos back-to-back updates Media immediately and downloads the current video rather than an older one.
+
+**Deduplicated Screenshot Alert with On-Demand Pin** — eliminates duplicate stacked floating windows from Windows 11 Snipping Tool clipboard updates via content fingerprinting, and replaces automatic popups with a sleek 5-second island alert featuring a one-click **Pin (`📌 تثبيت`)** button to float captures at `1:1` size only when you want them (optional **Auto-pin immediately** remains available in Settings).
+
+**Universal Island Pin Button & Edge-Stability Fix** — adds an always-available Pin toggle button in the expanded island topbar (synced with `Ctrl+Alt+I`), adds a 240 ms leave grace window with generous edge bounds and Windows 11 shell-overlay exclusions so the island no longer vanishes prematurely near screen edges.
+
+**Optional Weather (off by default) & Dedicated Clipboard Tab** — turns weather fetching off by default (`Settings › Island › Weather`) to save memory and network wakeups, and dedicates the expanded Clipboard tab cleanly to your 50-item clipboard history while keeping CPU/RAM meters on the awake idle pill.
+
+**Built-in Stopwatch** — adds a count-up **Stopwatch** inside the Timer tab (Start / Pause / Resume / Reset, shown on the compact pill while running, `0%` idle CPU when stopped).
+
+**Customizable Prayer & Iqama Alerts + Curated Online Adhan Library** — configure pre-prayer reminder timing (`Off`, `5`–`30 min`), Iqama delay (`5`–`30 min`), pre-Iqama heads-up (`At iqama`, `1`–`10 min`), selectable Web Audio notification chimes with instant preview, and optional one-click online Adhan MP3 downloads (Makkah, Alafasy, Abdul Basit, Refaat, Minshawi, Qatami, and Fajr Adhan) cached locally on disk with zero ongoing RAM or network cost.
+
 ## What's new in 1.8.14
 
 **Region Screenshot & Native 1:1 Floating Pin Overlay (`PrtScn` / `Ctrl+Alt+S`)** — captures taken through Windows' built-in Snipping overlay (`PrtScn`, `Win+Shift+S`, `Ctrl+Alt+S`, or tray **Snip & pin**) immediately stay on screen in a crisp, frameless native Win32 floating window at their exact `1:1` captured pixel size, pinned Always-on-Top above other apps without opening any editor or WebView (`0%` idle CPU). Drag anywhere to move; hover to toggle Always-on-Top or close; press `Esc` / double-click / middle-click to dismiss; right-click for Always-on-Top, Copy image, Save as PNG, or Close all. Toggleable under **Settings › Alerts & Privacy › Pin screenshots on screen**.

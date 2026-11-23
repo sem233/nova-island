@@ -242,6 +242,19 @@ fn prefs_channel(app: &Rc<RefCell<App>>, channel: &str, args: &[Value], id: Opti
             }
             crate::adhan::info()
         }
+        "adhan-download" => {
+            let fajr = arg0 == "fajr";
+            let preset_id = args.get(1).and_then(Value::as_str).unwrap_or("").to_string();
+            let bus = app.borrow().bus.clone();
+            later(app, id, move || {
+                let r = crate::adhan::download_preset(fajr, &preset_id);
+                if r.get("ok").is_some() {
+                    bus.event("adhan-file", Value::Null);
+                }
+                r
+            });
+            return Some(None);
+        }
         "plugin-install-file" => {
             let hwnd = app.borrow().prefs.as_ref().map(|p| p.hwnd);
             match crate::files::pick(hwnd, "Install a plugin", false, Some(("Nova Island plugin", "*.nvp"))) {
@@ -290,8 +303,8 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
         });
     }
     if src == Src::Prefs {
-        if let Some(Some(v)) = prefs_channel(app, &channel, &args, id) {
-            if let Some(id) = id {
+        if let Some(reply) = prefs_channel(app, &channel, &args, id) {
+            if let (Some(v), Some(id)) = (reply, id) {
                 answer(app, id, v);
             }
             return;
@@ -602,6 +615,10 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
         "dl-folder-remove" => app.borrow().downloads.remove_folder(arg0.as_str().unwrap_or("")),
         "shot-to-shelf" => {
             app.borrow().shots.to_shelf(0.0);
+            Value::Null
+        }
+        "shot-pin" => {
+            crate::pin_last_screenshot(app);
             Value::Null
         }
         // --- shelf ---

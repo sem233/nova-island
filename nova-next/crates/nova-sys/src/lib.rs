@@ -178,7 +178,8 @@ pub fn start_every(emit: impl Fn(String) + Send + 'static, tick_ms: u64) -> Send
                 tick += 1;
 
                 let mut o = Line::new();
-                let session = media::current(st.mgr.as_ref());
+                let fg = win::foreground_snapshot();
+                let session = media::current_for(st.mgr.as_ref(), &fg.proc_name);
                 // VLC (no media session): shown while it plays and the session isn't playing,
                 // or paused with no session at all
                 // (1.8.3) a player that was shown and is now paused stays shown until something
@@ -224,8 +225,10 @@ pub fn start_every(emit: impl Fn(String) + Send + 'static, tick_ms: u64) -> Send
                 } else if let Some(s) = session.as_ref() {
                     let i = media::info(s);
                     o = o.bool("has", true).str("title", &i.title).str("artist", &i.artist).str("album", &i.album).str("app", &i.app).bool("playing", i.playing).num("pos", json::round(i.pos, 2)).num("dur", json::round(i.dur, 2));
-                    // browsers publish the thumbnail after the title, so keep retrying for ~10 s
-                    let key = format!("{}|{}|{}", i.title, i.artist, i.app);
+                    // browsers publish the thumbnail after the title, so keep retrying for ~10 s;
+                    // include duration so consecutive short videos with a generic site title still refresh
+                    let dur_k = if i.dur > 0.0 { i.dur.round() as i64 } else { 0 };
+                    let key = format!("{}|{}|{}|{}", i.title, i.artist, i.app, dur_k);
                     if last_key.as_deref() != Some(key.as_str()) {
                         last_key = Some(key);
                         thumb_ok = false;
@@ -254,7 +257,6 @@ pub fn start_every(emit: impl Fn(String) + Send + 'static, tick_ms: u64) -> Send
                     st.bright = brightness::get();
                 }
                 o = o.int("bright", if bright_ok { st.bright } else { -1 });
-                let fg = win::foreground_snapshot();
                 o = o.bool("fs", fg.fullscreen).int("kl", fg.layout).bool("caps", win::caps_lock());
                 let seq = win::clipboard_seq();
                 // a change is reported once it's known whether it's private: the app copying it may

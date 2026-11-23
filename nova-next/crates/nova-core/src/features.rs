@@ -30,9 +30,17 @@ pub fn defaults() -> Map<String, Value> {
         ("hudBrightness", json!(true)),
         ("battery", json!(true)),
         ("prayerAlerts", json!(true)),
-        ("asrHanafi", json!(false)), // Asr by the Hanafi shadow rule
-        ("adhanSound", json!(false)), // (1.8.7) the adhan plays with the prayer alert (off until turned on)
-        ("hijriAdjust", json!(0)),   // days added to the Hijri date (local moon sighting)
+        ("prayerSoonMin", json!(10)),      // minutes before each prayer to alert (0 = off)
+        ("prayerSoonSound", json!("bell")), // pre-prayer alert chime
+        ("iqamaAlert", json!(true)),       // remind before / at iqama
+        ("iqamaDelayMin", json!(15)),      // minutes after adhan until iqama
+        ("iqamaBeforeMin", json!(2)),      // alert N minutes before iqama (0 = at iqama)
+        ("iqamaSound", json!("crystal")),  // iqama alert chime
+        ("asrHanafi", json!(false)),       // Asr by the Hanafi shadow rule
+        ("adhanSound", json!(false)),      // (1.8.7) the adhan plays with the prayer alert (off until turned on)
+        ("adhanPreset", json!("")),        // selected online adhan preset id (or "")
+        ("adhanFajrPreset", json!("")),    // selected online Fajr adhan preset id (or "")
+        ("hijriAdjust", json!(0)),         // days added to the Hijri date (local moon sighting)
         // IDM Nova
         ("downloads", json!(true)),
         ("dlToasts", json!(true)),
@@ -55,14 +63,16 @@ pub fn defaults() -> Map<String, Value> {
         ("theme", json!("madar")),     // the island's look (themes.css; 1.8.7: Madar for new users)
         ("prefsLang", json!("en")),    // the Settings window in English or Arabic (1.8: "en" | "ar")
         ("clock24", json!(false)),     // times in 24 hours on the island and the widgets (1.8; off: 12 hours)
-        // System tab
+        // System / Clipboard tab
+        ("weather", json!(false)),          // optional weather fetch (off by default to save resources)
         ("clipboardHistory", json!(true)),
         ("clipPersist", json!(true)),       // save clipboard history to disk until it expires
         ("clipMaxItems", json!(50)),        // max unpinned clipboard history items (5..=50)
         ("clipExpireMinutes", json!(60)),   // auto-clear clipboard history after N minutes (0 = never)
-        // copied image / screenshot -> toast; on the Shelf by itself for a while, or "Add to Shelf"
+        // copied image / screenshot -> sleek toast with Pin button; optional auto-pin & auto-shelf
         ("screenshotToast", json!(true)),
-        ("shotPinOverlay", json!(true)),    // float captured region screenshots on screen at 1:1 size
+        ("shotPinOverlay", json!(true)),    // show Pin-on-screen button on screenshot toast
+        ("shotAutoPin", json!(false)),      // automatically float captured screenshots without clicking
         ("shotAutoShelf", json!(true)),
         ("shotShelfMinutes", json!(20)),
         // mic / camera in use
@@ -116,6 +126,9 @@ fn range(key: &str) -> Option<(f64, f64)> {
         "breakMin" => (1.0, 60.0),
         "longBreakMin" => (5.0, 60.0),
         "hijriAdjust" => (-2.0, 2.0),
+        "prayerSoonMin" => (0.0, 60.0),
+        "iqamaDelayMin" => (5.0, 45.0),
+        "iqamaBeforeMin" => (0.0, 15.0),
         "waterEvery" => (15.0, 240.0),
         "waterGoal" => (4.0, 16.0),
         "shotShelfMinutes" => (5.0, 1440.0),
@@ -130,6 +143,10 @@ fn range(key: &str) -> Option<(f64, f64)> {
 pub const THEMES: &[&str] = &["original", "bakka", "outline", "midnight", "forest", "snow", "cat", "galaxy", "aurora", "ocean", "nody", "lava", "retro", "madar"];
 /// Themes without glass: no screen capture behind them.
 pub const SOLID_THEMES: &[&str] = &["bakka", "midnight", "forest", "cat", "galaxy", "aurora", "ocean", "nody", "lava", "retro", "madar"];
+/// Built-in synthesized prayer & iqama alert chimes (zero audio-file RAM overhead).
+pub const PRAYER_SOUNDS: &[&str] = &["silent", "bell", "chime", "crystal", "takbir", "pulse"];
+/// Online Adhan presets (empty = default/none, "custom" = user file).
+pub const ADHAN_PRESETS: &[&str] = &["", "custom", "makkah", "alafasy", "abdulbasit", "refaat", "minshawi", "qatami", "fajr_malek"];
 
 /// Keeps only known keys with values of the right type (numbers rounded and clamped to their range).
 pub fn pick(obj: &Value, defaults: &Map<String, Value>) -> Map<String, Value> {
@@ -146,6 +163,14 @@ pub fn pick(obj: &Value, defaults: &Map<String, Value>) -> Map<String, Value> {
             }
         } else if k == "prefsLang" {
             if v.as_str().is_some_and(|s| s == "en" || s == "ar") {
+                out.insert(k.clone(), v.clone());
+            }
+        } else if k == "prayerSoonSound" || k == "iqamaSound" {
+            if v.as_str().is_some_and(|s| PRAYER_SOUNDS.contains(&s)) {
+                out.insert(k.clone(), v.clone());
+            }
+        } else if k == "adhanPreset" || k == "adhanFajrPreset" {
+            if v.as_str().is_some_and(|s| ADHAN_PRESETS.contains(&s)) {
                 out.insert(k.clone(), v.clone());
             }
         } else if let Some((lo, hi)) = range(k) {
@@ -216,5 +241,43 @@ impl Features {
     pub fn reset(&mut self) {
         self.values = self.defaults.clone();
         let _ = self.store.save("features.json", &Value::Object(self.values.clone()));
+    }
+}
+
+#[cfg(test)]
+mod v1815_tests {
+    use super::*;
+
+    #[test]
+    fn v1815_defaults_and_validation() {
+        let defs = defaults();
+        assert_eq!(defs.get("weather"), Some(&json!(false)));
+        assert_eq!(defs.get("shotAutoPin"), Some(&json!(false)));
+        assert_eq!(defs.get("shotPinOverlay"), Some(&json!(true)));
+        assert_eq!(defs.get("prayerSoonMin"), Some(&json!(10)));
+        assert_eq!(defs.get("prayerSoonSound"), Some(&json!("bell")));
+        assert_eq!(defs.get("iqamaAlert"), Some(&json!(true)));
+        assert_eq!(defs.get("iqamaDelayMin"), Some(&json!(15)));
+        assert_eq!(defs.get("iqamaBeforeMin"), Some(&json!(2)));
+        assert_eq!(defs.get("iqamaSound"), Some(&json!("crystal")));
+
+        let cleaned = pick(&json!({
+            "weather": true,
+            "prayerSoonMin": 999,
+            "prayerSoonSound": "takbir",
+            "iqamaSound": "invalid_sound",
+            "iqamaDelayMin": 2,
+            "iqamaBeforeMin": 25,
+            "adhanPreset": "makkah",
+            "adhanFajrPreset": "evil_url",
+        }), &defs);
+        assert_eq!(cleaned.get("weather"), Some(&json!(true)));
+        assert_eq!(cleaned.get("prayerSoonMin").and_then(Value::as_f64), Some(60.0));
+        assert_eq!(cleaned.get("prayerSoonSound"), Some(&json!("takbir")));
+        assert!(!cleaned.contains_key("iqamaSound"));
+        assert_eq!(cleaned.get("iqamaDelayMin").and_then(Value::as_f64), Some(5.0));
+        assert_eq!(cleaned.get("iqamaBeforeMin").and_then(Value::as_f64), Some(15.0));
+        assert_eq!(cleaned.get("adhanPreset"), Some(&json!("makkah")));
+        assert!(!cleaned.contains_key("adhanFajrPreset"));
     }
 }

@@ -763,6 +763,9 @@ pub fn features_changed(a: &Rc<RefCell<App>>, before: &Value) {
     {
         s.system.clip_settings_changed();
     }
+    if now["weather"] != before["weather"] {
+        s.system.weather_settings_changed();
+    }
     s.network.set_enabled(now["netToasts"] == true);
     s.privacy.set_enabled(now["privacyDots"] == true);
     s.downloads.set_enabled(now["downloads"] == true);
@@ -1463,6 +1466,20 @@ pub fn drag_timer(hwnd: HWND, on: bool) {
         } else {
             let _ = KillTimer(Some(hwnd), TIMER_DRAG);
         }
+    }
+}
+
+/// Spawns a 1:1 native floating pin overlay for the most recently captured screenshot (on-demand toast Pin button).
+pub fn pin_last_screenshot(a: &Rc<RefCell<App>>) {
+    let (img, hint, arabic) = {
+        let s = a.borrow();
+        let img = s.shots.last_image();
+        let hint = s.pending_pin_drag.lock().unwrap().take();
+        let arabic = s.core.features.get()["prefsLang"].as_str() == Some("ar");
+        (img, hint, arabic)
+    };
+    if let Some((w, h, px)) = img {
+        let _ = pin::spawn(w, h, px, hint, arabic);
     }
 }
 

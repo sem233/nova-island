@@ -16,6 +16,8 @@ pub const WIN_W: f64 = 640.0;
 pub const WIN_H: f64 = 320.0;
 pub const CALC_WIN_H: f64 = 440.0;
 const HOVER_INTENT_MS: u128 = 280;
+/// Grace period before collapsing an open island after the cursor briefly slips past an edge.
+const LEAVE_GRACE_MS: u128 = 240;
 /// (1.8.7) the thin line stays this long after it last looked over the browser's tabs
 const LINE_KEEP: std::time::Duration = std::time::Duration::from_millis(1500);
 /// how much of the browser window's top is its tab strip, DIPs (a maximized window starts 8px
@@ -101,6 +103,7 @@ pub struct Core {
     inside: bool,
     active: bool,
     entered_at: Instant,
+    left_at: Option<Instant>,
     suppress_until_leave: bool,
     near_sent: Option<(f64, f64)>,
     pub cursor_far: bool,
@@ -119,7 +122,7 @@ impl Core {
             anchor: None, last_layout: String::new(), omni: None, omni_key: String::new(), drag: None, drag_from: None,
             user_hidden: false, fullscreen_hidden: false, tab_rects: Vec::new(), line: false, line_rect: Rect::default(), line_off_since: None, browser_rect: None, ghost: false, ghost_open: false, dimmed: false, clickable: false, pinned: false,
             calc_open: false, calc_closing: false, timer_active: false, calc_rect: Rect::default(),
-            island_rect: Rect::default(), rest_rect: Rect::default(), pending_rest: None, inside: false, active: false, entered_at: Instant::now(), suppress_until_leave: false,
+            island_rect: Rect::default(), rest_rect: Rect::default(), pending_rest: None, inside: false, active: false, entered_at: Instant::now(), left_at: None, suppress_until_leave: false,
             near_sent: None, cursor_far: false,
         }
     }
@@ -591,6 +594,9 @@ impl Core {
             return;
         }
         self.active = on;
+        if on {
+            self.left_at = None;
+        }
         self.win.set_ignore_mouse(!on);
         if !on {
             self.win.set_focusable(false);
@@ -639,10 +645,21 @@ impl Core {
     // browser tab underneath never gets caught.
     pub fn poll_cursor(&mut self) {
         let (px, py) = screen::cursor();
-        self.poll_cursor_at(px, py, Instant::now());
+        let down = unsafe {
+            (windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
+                windows::Win32::UI::Input::KeyboardAndMouse::VK_LBUTTON.0 as i32,
+            ) as u16
+                & 0x8000)
+                != 0
+        };
+        self.poll_cursor_state(px, py, Instant::now(), down);
     }
 
     pub fn poll_cursor_at(&mut self, px: f64, py: f64, now_ts: Instant) {
+        self.poll_cursor_state(px, py, now_ts, false);
+    }
+
+    pub fn poll_cursor_state(&mut self, px: f64, py: f64, now_ts: Instant, mouse_down: bool) {
         // the line waiting to go: looked at again until it's back over the tabs or LINE_KEEP is up
         if self.line_off_since.is_some() && !self.active {
             self.update_line();
@@ -670,9 +687,15 @@ impl Core {
         let fy = (r.y - y).max(0.0).max(y - r.y - r.height);
         self.cursor_far = !self.calc_active() && fx.hypot(fy) > FAR_PX;
         self.send_near(x, y, fx.hypot(fy));
-        // the thin line is 4px: a little more room to rest the cursor on it
-        let pad = if self.active { 8.0 } else if self.line { 6.0 } else { 2.0 };
-        let in_island = r.width > 0.0 && r.height > 0.0 && x >= r.x - pad && x <= r.x + r.width + pad && y >= r.y - pad && y <= r.y + r.height + pad;
+        // Generous edge padding while open so approaching an edge/button never collapses the island;
+        // extend the docked screen edge flush to 0 so pushing the pointer against the top/side screen
+        // border stays inside.
+        let pad = if self.active { 14.0 } else if self.line { 8.0 } else { 3.0 };
+        let min_x = if self.vertical() && self.side() == "left" { -6.0 } else { r.x - pad };
+        let max_x = if self.vertical() && self.side() == "right" { WIN_W + 6.0 } else { r.x + r.width + pad };
+        let min_y = if !self.vertical() && (self.docked() || self.line || r.y <= 14.0) { -6.0 } else { r.y - pad };
+        let max_y = r.y + r.height + pad;
+        let in_island = r.width > 0.0 && r.height > 0.0 && x >= min_x && x <= max_x && y >= min_y && y <= max_y;
         let c = self.calc_rect;
         let in_calc = self.calc_active() && c.width > 0.0 && c.height > 0.0 && x >= c.x - 4.0 && x <= c.x + c.width + 4.0 && y >= c.y - 4.0 && y <= c.y + c.height + 4.0;
         let now = in_island || in_calc;
@@ -681,6 +704,7 @@ impl Core {
         }
         self.inside = now;
         if self.calc_active() {
+            self.left_at = None;
             self.win.set_ignore_mouse(!now);
             if now && !self.active && !self.suppress_until_leave {
                 self.set_active(true);
@@ -690,9 +714,25 @@ impl Core {
         let instant_wake = self.clickable || self.pinned || self.ghost_open;
         if !now {
             self.suppress_until_leave = false;
-            self.set_active(false);
-        } else if !self.active && !self.suppress_until_leave && (instant_wake || (!self.ghost && now_ts.saturating_duration_since(self.entered_at).as_millis() >= HOVER_INTENT_MS)) {
-            self.set_active(true);
+            if self.active {
+                if mouse_down {
+                    // Holding a slider / scrollbar near the border must never collapse the island.
+                    self.left_at = None;
+                    return;
+                }
+                let since = *self.left_at.get_or_insert(now_ts);
+                if now_ts.saturating_duration_since(since).as_millis() >= LEAVE_GRACE_MS {
+                    self.left_at = None;
+                    self.set_active(false);
+                }
+            } else {
+                self.left_at = None;
+            }
+        } else {
+            self.left_at = None;
+            if !self.active && !self.suppress_until_leave && (instant_wake || (!self.ghost && now_ts.saturating_duration_since(self.entered_at).as_millis() >= HOVER_INTENT_MS)) {
+                self.set_active(true);
+            }
         }
     }
 
@@ -868,9 +908,10 @@ mod tests {
         assert!(!core.win.ignore_mouse());
         assert!(!core.dimmed(), "active island must remain opaque while cursor is inside");
 
-        // Moving the cursor off cleanly resumes click-through over tabs.
+        // Moving the cursor off cleanly resumes click-through over tabs after leave grace.
         let (wx, wy) = core.win.pos();
         core.poll_cursor_at(wx - 50.0, wy + 250.0, t0 + Duration::from_millis(50));
+        core.poll_cursor_at(wx - 50.0, wy + 250.0, t0 + Duration::from_millis(320));
         assert!(!core.active());
         assert!(core.win.ignore_mouse());
         assert!(core.dimmed());
@@ -894,7 +935,9 @@ mod tests {
         assert!(!core.dimmed());
 
         let (wx, wy) = core.win.pos();
-        core.poll_cursor_at(wx - 40.0, wy + 250.0, Instant::now());
+        let t_out = Instant::now();
+        core.poll_cursor_at(wx - 40.0, wy + 250.0, t_out);
+        core.poll_cursor_at(wx - 40.0, wy + 250.0, t_out + Duration::from_millis(300));
         core.set_pinned(false);
         assert!(!core.active());
         assert!(core.win.ignore_mouse());
@@ -904,7 +947,7 @@ mod tests {
     #[test]
     fn leaving_browser_clears_stale_tabs_and_dim() {
         let (mut core, _) = test_core();
-        let (wx, wy) = core.win.pos();
+        let (wx, _wy) = core.win.pos();
         core.on_browser(&json!({ "x": wx as i32, "y": 0, "w": 1200, "h": 800 }));
         core.on_tabs(&overlapping_tab_json(&core));
         assert!(core.dimmed());
@@ -993,5 +1036,39 @@ mod tests {
         assert!(core.set_calc_open(false));
         assert!(!core.calc_active());
         assert_eq!(core.win.size(), (WIN_W, WIN_H));
+    }
+
+    #[test]
+    fn brief_edge_exit_and_top_edge_do_not_collapse_active_island() {
+        let (mut core, _) = test_core();
+        let (cx, cy) = pill_center(&core);
+        let t0 = Instant::now();
+        core.poll_cursor_at(cx, cy, t0);
+        core.poll_cursor_at(cx, cy, t0 + Duration::from_millis(320));
+        assert!(core.active());
+
+        // Pushing cursor flush to the top screen edge (y = 0) stays inside
+        core.poll_cursor_at(cx, 0.0, t0 + Duration::from_millis(360));
+        assert!(core.active());
+        assert!(core.inside());
+
+        // Stepping slightly past the edge for 100ms (< LEAVE_GRACE_MS) must NOT collapse
+        let (wx, wy) = core.win.pos();
+        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(400));
+        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(500));
+        assert!(core.active(), "brief slip past edge must not collapse open island");
+
+        // Holding left mouse button down outside the edge keeps interaction alive
+        core.poll_cursor_state(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(800), true);
+        assert!(core.active(), "mouse drag near edge must keep island active");
+
+        // Returning inside cancels leave timer
+        core.poll_cursor_at(cx, cy, t0 + Duration::from_millis(840));
+        assert!(core.active());
+
+        // Actually leaving for >= LEAVE_GRACE_MS collapses cleanly
+        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(900));
+        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(1200));
+        assert!(!core.active(), "sustained exit must collapse cleanly");
     }
 }
