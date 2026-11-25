@@ -36,6 +36,8 @@ pub fn defaults() -> Map<String, Value> {
         ("iqamaDelayMin", json!(15)),      // minutes after adhan until iqama
         ("iqamaBeforeMin", json!(2)),      // alert N minutes before iqama (0 = at iqama)
         ("iqamaSound", json!("crystal")),  // iqama alert chime
+        ("prayerMethod", json!("auto")),   // calculation authority ("auto" or method ID like "EGYPT", "MAKKAH")
+        ("prayerOffsetMin", json!(0)),     // manual minute shift applied to all prayer times (-15..=15)
         ("asrHanafi", json!(false)),       // Asr by the Hanafi shadow rule
         ("adhanSound", json!(false)),      // (1.8.7) the adhan plays with the prayer alert (off until turned on)
         ("adhanPreset", json!("")),        // selected online adhan preset id (or "")
@@ -60,6 +62,7 @@ pub fn defaults() -> Map<String, Value> {
         ("batterySaverAt", json!(20)), // percent
         ("news", json!(true)),         // plugins, updates and news from the Nova team (news.json on GitHub)
         ("calculator", json!(true)),   // compact calculator panel in the expanded island topbar
+        ("ramBooster", json!(true)),   // one-click Windows cache cleaner & RAM optimizer in topbar
         ("theme", json!("madar")),     // the island's look (themes.css; 1.8.7: Madar for new users)
         ("prefsLang", json!("en")),    // the Settings window in English or Arabic (1.8: "en" | "ar")
         ("clock24", json!(false)),     // times in 24 hours on the island and the widgets (1.8; off: 12 hours)
@@ -129,6 +132,7 @@ fn range(key: &str) -> Option<(f64, f64)> {
         "prayerSoonMin" => (0.0, 60.0),
         "iqamaDelayMin" => (5.0, 45.0),
         "iqamaBeforeMin" => (0.0, 15.0),
+        "prayerOffsetMin" => (-15.0, 15.0),
         "waterEvery" => (15.0, 240.0),
         "waterGoal" => (4.0, 16.0),
         "shotShelfMinutes" => (5.0, 1440.0),
@@ -147,6 +151,11 @@ pub const SOLID_THEMES: &[&str] = &["bakka", "midnight", "forest", "cat", "galax
 pub const PRAYER_SOUNDS: &[&str] = &["silent", "bell", "chime", "crystal", "takbir", "pulse"];
 /// Online Adhan presets (empty = default/none, "custom" = user file).
 pub const ADHAN_PRESETS: &[&str] = &["", "custom", "makkah", "alafasy", "abdulbasit", "refaat", "minshawi", "qatami", "fajr_malek"];
+/// Prayer calculation authorities ("auto" picks by detected country/timezone).
+pub const PRAYER_METHODS: &[&str] = &[
+    "auto", "EGYPT", "MAKKAH", "MWL", "ISNA", "KARACHI", "GULF", "KUWAIT", "QATAR", "DUBAI",
+    "JORDAN", "TURKEY", "MOROCCO", "ALGERIA", "TUNISIA", "SINGAPORE", "JAKIM", "KEMENAG", "FRANCE", "RUSSIA", "TEHRAN",
+];
 
 /// Keeps only known keys with values of the right type (numbers rounded and clamped to their range).
 pub fn pick(obj: &Value, defaults: &Map<String, Value>) -> Map<String, Value> {
@@ -171,6 +180,10 @@ pub fn pick(obj: &Value, defaults: &Map<String, Value>) -> Map<String, Value> {
             }
         } else if k == "adhanPreset" || k == "adhanFajrPreset" {
             if v.as_str().is_some_and(|s| ADHAN_PRESETS.contains(&s)) {
+                out.insert(k.clone(), v.clone());
+            }
+        } else if k == "prayerMethod" {
+            if v.as_str().is_some_and(|s| PRAYER_METHODS.contains(&s)) {
                 out.insert(k.clone(), v.clone());
             }
         } else if let Some((lo, hi)) = range(k) {

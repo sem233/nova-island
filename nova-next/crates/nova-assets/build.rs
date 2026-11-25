@@ -696,7 +696,136 @@ const PATCHES: &[(&str, &str, &str)] = &[
     (
         "prefs/prefs.js",
         "  if (unit === 'items') return `${n} items`;\n",
-        "  if (unit === 'optmin') return n === 0 ? 'Off' : `${n} min`;\n  if (unit === 'iqmin') return n === 0 ? 'At iqama' : `${n} min`;\n  if (unit === 'items') return `${n} items`;\n",
+        "  if (unit === 'optmin') return n === 0 ? 'Off' : `${n} min`;\n  if (unit === 'iqmin') return n === 0 ? 'At iqama' : `${n} min`;\n  if (unit === 'smin') return n === 0 ? 'None' : `${n > 0 ? '+' : '−'}${Math.abs(n)} min`;\n  if (unit === 'items') return `${n} items`;\n",
+    ),
+    // (1.8.16) Windows Cache Cleaner & RAM Booster IPC, styles, topbar button & script
+    (
+        "preload.js",
+        "  shotPin: () => ipcRenderer.send('shot-pin'),\n",
+        "  shotPin: () => ipcRenderer.send('shot-pin'),\n  boostStats: () => ipcRenderer.invoke('boost-stats'),\n  boostRun: () => ipcRenderer.invoke('boost-run'),\n",
+    ),
+    (
+        "prefs/preload.js",
+        "  adhanDownload: (which, preset) => ipcRenderer.invoke('adhan-download', which, preset),\n",
+        "  adhanDownload: (which, preset) => ipcRenderer.invoke('adhan-download', which, preset),\n  prayerTest: () => ipcRenderer.send('prayer-test'),\n",
+    ),
+    (
+        "index.html",
+        "  <link rel=\"stylesheet\" href=\"style-calculator.css\">\n",
+        "  <link rel=\"stylesheet\" href=\"style-calculator.css\">\n  <link rel=\"stylesheet\" href=\"style-boost.css\">\n",
+    ),
+    (
+        "index.html",
+        "            <button type=\"button\" class=\"gear pin-btn\" id=\"pin-island\"",
+        "            <button type=\"button\" class=\"gear boost-btn\" id=\"open-boost\" title=\"Clean cache &amp; boost RAM\" aria-label=\"Clean cache &amp; boost RAM\" aria-expanded=\"false\"><svg class=\"s\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M13 2 3 14h9l-1 8 10-12h-9l1-8z\"/></svg></button>\n            <button type=\"button\" class=\"gear pin-btn\" id=\"pin-island\"",
+    ),
+    (
+        "index.html",
+        "  <script src=\"views/topbar-pin.js\"></script>\n",
+        "  <script src=\"views/topbar-pin.js\"></script>\n  <script src=\"views/boost.js\"></script>\n",
+    ),
+    // (1.8.16) Instant hover-out (remove redundant 160ms hoverTimer), exact thin-line rect on collapse,
+    // and immediate reportLoop wake (eliminates 2.5s stale hit-box window in Chrome)
+    (
+        "renderer.js",
+        "let hoverTimer = null;\nbridge.onHover((v) => {\n  clearTimeout(hoverTimer);\n  if (v) {\n    state.hover = true;\n    render();\n  } else {\n    hoverTimer = setTimeout(() => {\n      state.hover = false;\n      render();\n    }, 160);\n  }\n});\n",
+        "bridge.onHover((v) => {\n  state.hover = !!v;\n  render();\n});\n",
+    ),
+    (
+        "renderer.js",
+        "      r = { left, top, width: Math.max(r.right, tx + tw) - left, height: Math.max(r.bottom, ty + th) - top };\n    }\n  }\n  // during a scene the card beside the character must take the mouse too\n",
+        "      r = { left, top, width: Math.max(r.right, tx + tw) - left, height: Math.max(r.bottom, ty + th) - top };\n    }\n  } else if ((lastMode === 'idle' || lastMode === 'compact') && island.classList.contains('addr-line')) {\n    const tx = parseFloat(island.style.getPropertyValue('--x'));\n    const ty = parseFloat(island.style.getPropertyValue('--y'));\n    if (!Number.isNaN(tx) && !Number.isNaN(ty)) {\n      r = { left: tx, top: ty, width: 96, height: 6 };\n    }\n  }\n  // during a scene the card beside the character must take the mouse too\n",
+    ),
+    (
+        "renderer.js",
+        "setTimeout(function reportLoop() {\n  if (state.visible) reportRect();\n  setTimeout(reportLoop, !state.visible ? 4000 : frameRunning || state.moving ? 50 : 2500);\n}, 0);\n",
+        "let reportTimer = null;\nfunction scheduleReport(ms) {\n  clearTimeout(reportTimer);\n  reportTimer = setTimeout(reportLoop, ms);\n}\nfunction reportLoop() {\n  if (state.visible) reportRect();\n  scheduleReport(!state.visible ? 4000 : frameRunning || state.moving ? 50 : 2500);\n}\nscheduleReport(0);\n",
+    ),
+    (
+        "renderer.js",
+        "function wake(ms = 900) {\n  awakeUntil = Math.max(awakeUntil, performance.now() + ms);\n  if (!frameRunning) {\n    frameRunning = true;\n    requestAnimationFrame(frame);\n  }\n}\n",
+        "function wake(ms = 900) {\n  awakeUntil = Math.max(awakeUntil, performance.now() + ms);\n  if (!frameRunning) {\n    frameRunning = true;\n    requestAnimationFrame(frame);\n    if (typeof scheduleReport === 'function') scheduleReport(50);\n  }\n}\n",
+    ),
+    // (1.8.16) Prayer polish: don't clash chime with Adhan MP3, 120s catch-up window paired with
+    // native TIMER_PRAYER, and live list re-render on feature/clock24 changes
+    (
+        "views/prayer.js",
+        "        chime();\n",
+        "        if (!window.adhanWillPlay?.()) chime();\n",
+    ),
+    (
+        "views/prayer.js",
+        "      if (diff <= 0 && diff > -60000 && !fired.has(id)) {\n",
+        "      if (diff <= 0 && diff > -120000 && !fired.has(id)) {\n",
+    ),
+    (
+        "views/prayer.js",
+        "      if (diff <= 0 && diff > -60000 && !fired.has(`${id}-now`)) {\n",
+        "      if (diff <= 0 && diff > -120000 && !fired.has(`${id}-now`)) {\n",
+    ),
+    (
+        "views/prayer.js",
+        "  window.addEventListener('island:features', (e) => {\n    alertsOn = e.detail.prayerAlerts !== false;\n    showBell();\n  });\n",
+        "  window.addEventListener('island:features', (e) => {\n    alertsOn = e.detail.prayerAlerts !== false;\n    showBell();\n    lastListKey = '';\n    tick();\n  });\n",
+    ),
+    // (1.8.16) Settings: RAM & Cache Booster toggle, Prayer calculation method, minute adjustment,
+    // clear Hanafi Asr hint, unambiguous "Remove file" Adhan button, and "Test prayer alert"
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><b>Calculator</b><input type=\"checkbox\" class=\"sw\" data-feature=\"calculator\"></label>\n",
+        "            <label class=\"row\"><b>Calculator</b><input type=\"checkbox\" class=\"sw\" data-feature=\"calculator\"></label>\n            <label class=\"row\"><div class=\"txt\"><b>RAM &amp; Cache Booster</b><small>Quickly clean Windows temp cache and free RAM from the island topbar</small></div><input type=\"checkbox\" class=\"sw\" data-feature=\"ramBooster\"></label>\n",
+    ),
+    (
+        "prefs/index.html",
+        "            <label class=\"row\"><b>Hanafi Asr</b><input type=\"checkbox\" class=\"sw\" data-feature=\"asrHanafi\"></label>\n",
+        r##"            <div class="row">
+              <label for="prayer-method" class="row-lbl">Calculation method</label>
+              <select id="prayer-method" name="prayerMethod" class="pr-select" data-select-feature="prayerMethod">
+                <option value="auto">Auto (by location)</option>
+                <option value="EGYPT">Egyptian General Authority of Survey</option>
+                <option value="MAKKAH">Umm Al-Qura (Makkah)</option>
+                <option value="MWL">Muslim World League</option>
+                <option value="ISNA">ISNA (North America)</option>
+                <option value="KARACHI">Karachi</option>
+                <option value="GULF">Gulf Region</option>
+                <option value="KUWAIT">Kuwait</option>
+                <option value="QATAR">Qatar</option>
+                <option value="DUBAI">Dubai</option>
+                <option value="JORDAN">Jordan</option>
+                <option value="TURKEY">Turkey (Diyanet)</option>
+                <option value="MOROCCO">Morocco</option>
+                <option value="ALGERIA">Algeria</option>
+                <option value="TUNISIA">Tunisia</option>
+              </select>
+            </div>
+            <div class="row"><b>Time adjustment</b>
+              <div class="stepper" data-num="prayerOffsetMin" data-steps="-15,-10,-5,-4,-3,-2,-1,0,1,2,3,4,5,10,15" data-unit="smin"><button type="button" data-dir="-1" aria-label="Less">−</button><output></output><button type="button" data-dir="1" aria-label="More">+</button></div>
+            </div>
+            <label class="row"><div class="txt"><b>Hanafi Asr</b><small>Off for standard/official timing (Egypt, Makkah, Shafi'i); ON shifts Asr ~45 min later</small></div><input type="checkbox" class="sw" data-feature="asrHanafi"></label>
+"##,
+    ),
+    (
+        "prefs/index.html",
+        r##"              <div class="adhan-btns"><button type="button" class="btn adhan-play">Play</button><button type="button" class="btn adhan-pick">Choose file</button><button type="button" class="btn adhan-reset" hidden>Default</button></div>
+              <div class="adhan-online">
+                <label for="adhan-preset-main""##,
+        r##"              <div class="adhan-btns"><button type="button" class="btn adhan-play">Play</button><button type="button" class="btn adhan-pick">Choose file</button><button type="button" class="btn danger adhan-reset" hidden>Remove file</button></div>
+              <div class="adhan-online">
+                <label for="adhan-preset-main""##,
+    ),
+    (
+        "prefs/index.html",
+        r##"              <div class="adhan-btns"><button type="button" class="btn adhan-play">Play</button><button type="button" class="btn adhan-pick">Choose file</button><button type="button" class="btn adhan-reset" hidden>Default</button></div>
+              <div class="adhan-online">
+                <label for="adhan-preset-fajr""##,
+        r##"              <div class="adhan-btns"><button type="button" class="btn adhan-play">Play</button><button type="button" class="btn adhan-pick">Choose file</button><button type="button" class="btn danger adhan-reset" hidden>Remove file</button></div>
+              <div class="adhan-online">
+                <label for="adhan-preset-fajr""##,
+    ),
+    (
+        "prefs/index.html",
+        "        </div>\n        <div class=\"group\">\n          <h2>Dhikr, du'a &amp; Qur'an</h2>\n",
+        "          <div class=\"actions\"><button type=\"button\" class=\"btn accent\" id=\"prayer-test-btn\">Test prayer alert</button></div>\n        </div>\n        <div class=\"group\">\n          <h2>Dhikr, du'a &amp; Qur'an</h2>\n",
     ),
 ];
 

@@ -1,6 +1,6 @@
 [package]
 name = "nova-app"
-version = "1.8.15"
+version = "1.8.16"
 edition = "2021"
 publish = false
 description = "Nova Island"

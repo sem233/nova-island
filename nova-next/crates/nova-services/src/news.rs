@@ -14,7 +14,7 @@ const EVERY_MS: u64 = 15 * 60 * 1000;
 const DAY_MS: f64 = 24.0 * 60.0 * 60.0 * 1000.0;
 
 /// The app's version, for an item's minVersion / maxVersion.
-pub const VERSION: &str = "1.8.15";
+pub const VERSION: &str = "1.8.16";
 
 /// nova://plugins/<id>, nova://settings/<page>, or Nova's own pages on the web
 pub fn link_ok(l: &str) -> bool {

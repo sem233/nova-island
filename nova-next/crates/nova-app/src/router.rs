@@ -255,6 +255,13 @@ fn prefs_channel(app: &Rc<RefCell<App>>, channel: &str, args: &[Value], id: Opti
             });
             return Some(None);
         }
+        "prayer-test" => {
+            crate::ensure_page_awake(app);
+            if let Some(p) = app.borrow().page.clone() {
+                p.run("window.testPrayerAlert?.()");
+            }
+            Value::Null
+        }
         "plugin-install-file" => {
             let hwnd = app.borrow().prefs.as_ref().map(|p| p.hwnd);
             match crate::files::pick(hwnd, "Install a plugin", false, Some(("Nova Island plugin", "*.nvp"))) {
@@ -473,6 +480,15 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
         "clips-copy" => {
             app.borrow().clips.copy(arg0.as_str().unwrap_or(""));
             Value::Null
+        }
+        // --- Windows Cache Cleaner & RAM Booster (1.8.16) ---
+        "boost-stats" => {
+            later(app, id, crate::boost::stats);
+            return;
+        }
+        "boost-run" => {
+            later(app, id, crate::boost::run);
+            return;
         }
         // --- Video Downloader (MDM) ---
         "video-probe" => {

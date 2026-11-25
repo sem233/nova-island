@@ -21,7 +21,7 @@
       const key = sel.dataset.selectFeature;
       api.setFeatures({ [key]: sel.value });
       if (typeof saved === 'function') saved();
-      if (sel.value !== 'silent') window.playPrayerSound?.(sel.value);
+      if (sel.id.includes('sound') && sel.value !== 'silent') window.playPrayerSound?.(sel.value);
     });
   }
   for (const btn of document.querySelectorAll('.pr-test[data-sound-for]')) {
@@ -29,6 +29,10 @@
       const sel = document.getElementById(btn.dataset.soundFor);
       if (sel) window.playPrayerSound?.(sel.value);
     });
+  }
+  const testPrayerBtn = document.getElementById('prayer-test-btn');
+  if (testPrayerBtn && api.prayerTest) {
+    testPrayerBtn.addEventListener('click', () => api.prayerTest());
   }
   api.onFeatures?.(syncSelects);
   api.features?.().then(syncSelects);

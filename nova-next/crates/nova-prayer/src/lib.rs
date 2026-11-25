@@ -58,6 +58,10 @@ fn method(id: &str) -> Method {
     *METHODS.iter().find(|m| m.id == id).unwrap_or(&METHODS[0])
 }
 
+pub fn method_by_id(id: &str) -> Option<Method> {
+    METHODS.iter().copied().find(|m| m.id.eq_ignore_ascii_case(id))
+}
+
 fn by_country(code: &str) -> Option<&'static str> {
     Some(match code {
         "EG" | "SD" | "LY" | "SY" | "LB" => "EGYPT",
@@ -301,7 +305,27 @@ pub struct Settings {
 
 /// One day's times as prayer.js's calcDay returns them (the same JSON shape and order).
 pub fn calc_day(day: Day, country: &str, lat: f64, lon: f64, timezone: &str, zone: &str, s: &Settings) -> Result<Value, String> {
-    let mut method = method_for(country, timezone);
+    calc_day_ext(day, country, lat, lon, timezone, zone, s, "", 0)
+}
+
+/// Extended prayer calculation supporting an explicit calculation method override (`"EGYPT"`,
+/// `"MAKKAH"`, etc.; empty or `"auto"` auto-selects by country) and a manual minute offset (`-15..=15`).
+pub fn calc_day_ext(
+    day: Day,
+    country: &str,
+    lat: f64,
+    lon: f64,
+    timezone: &str,
+    zone: &str,
+    s: &Settings,
+    method_override: &str,
+    offset_min: i64,
+) -> Result<Value, String> {
+    let mut method = if method_override.is_empty() || method_override.eq_ignore_ascii_case("auto") {
+        method_for(country, timezone)
+    } else {
+        method_by_id(method_override).unwrap_or_else(|| method_for(country, timezone))
+    };
     let (hijri, hijri_month) = hijri_of(day, s.hijri_adjust);
     // Umm al-Qura: Isha two hours after Maghrib in Ramadan
     if method.id == "MAKKAH" && hijri_month == 9 {
@@ -318,7 +342,8 @@ pub fn calc_day(day: Day, country: &str, lat: f64, lon: f64, timezone: &str, zon
     t.asr += 1.0 / 60.0;
     t.dhuhr += method.tune.0 / 60.0;
     t.maghrib += method.tune.1 / 60.0;
-    let at = |h: f64| clock_in(zone, day, h);
+    let shift_h = (offset_min.clamp(-15, 15) as f64) / 60.0;
+    let at = |h: f64| clock_in(zone, day, h + shift_h);
     Ok(json!({
         "date": format!("{}-{:02}-{:02}", day.y, day.m, day.d),
         "times": {

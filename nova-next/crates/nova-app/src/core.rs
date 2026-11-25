@@ -15,9 +15,12 @@ use crate::{
 pub const WIN_W: f64 = 640.0;
 pub const WIN_H: f64 = 320.0;
 pub const CALC_WIN_H: f64 = 440.0;
-const HOVER_INTENT_MS: u128 = 280;
-/// Grace period before collapsing an open island after the cursor briefly slips past an edge.
-const LEAVE_GRACE_MS: u128 = 240;
+/// Short dwell so touching the pill or Chrome thin line opens almost instantly while ignoring a fast sweep.
+const HOVER_INTENT_MS: u128 = 45;
+/// Tiny jitter guard (~2 polls) so leaving the open island collapses immediately without 1px edge flicker.
+const LEAVE_GRACE_MS: u128 = 35;
+const THIN_LINE_W: f64 = 96.0;
+const THIN_LINE_H: f64 = 6.0;
 /// (1.8.7) the thin line stays this long after it last looked over the browser's tabs
 const LINE_KEEP: std::time::Duration = std::time::Duration::from_millis(1500);
 /// how much of the browser window's top is its tab strip, DIPs (a maximized window starts 8px
@@ -247,6 +250,24 @@ impl Core {
         self.features.bool("browserLine") && !self.features.bool("addrIsland") && !self.vertical()
     }
 
+    /// Exact window-local geometry of the collapsed Chrome "Thin line" bar (96x6 at top edge).
+    fn thin_line_rect(&self) -> Rect {
+        let (wx, _) = self.win.pos();
+        let ax = self.anchor.map(|a| a.x).unwrap_or(wx + WIN_W / 2.0);
+        let local_x = clamp(round(ax - wx) - THIN_LINE_W / 2.0, 4.0, WIN_W - THIN_LINE_W - 4.0);
+        Rect { x: local_x, y: 0.0, width: THIN_LINE_W, height: THIN_LINE_H }
+    }
+
+    /// Snaps `island_rect` immediately to the collapsed target rect on close or thin-line entry so
+    /// a shrinking CSS transition can never leave an oversized hit-box over Chrome tabs.
+    fn snap_collapsed_rect(&mut self) {
+        if self.line && !self.vertical() {
+            self.island_rect = self.thin_line_rect();
+        } else if self.rest_rect.width > 0.0 && self.rest_rect.height > 0.0 {
+            self.island_rect = self.rest_rect;
+        }
+    }
+
     /// The island is the thin line now (the glass isn't captured for it).
     pub fn is_line(&self) -> bool {
         self.line && !self.active
@@ -292,6 +313,9 @@ impl Core {
             self.line = want;
             nova_core::log::info(if want { "browser line: on (over the tabs)" } else { "browser line: off" });
             self.layout();
+            if !self.active && !self.clickable && !self.pinned && !self.ghost_open {
+                self.snap_collapsed_rect();
+            }
         }
     }
 
@@ -580,9 +604,20 @@ impl Core {
     }
 
     pub fn set_island_rect(&mut self, r: Rect) {
-        self.island_rect = r;
         let is_expanded_rect = r.width > 410.0 && r.height > 70.0;
-        if !self.active && !self.clickable && !self.pinned && !self.ghost_open && !is_expanded_rect {
+        let idle_closed = !self.active && !self.clickable && !self.pinned && !self.ghost_open;
+        if idle_closed && self.line && (r.width > THIN_LINE_W + 14.0 || r.height > THIN_LINE_H + 10.0) {
+            // Ignore stale/mid-shrink DOM rects while collapsed to the Chrome thin line.
+            self.island_rect = self.thin_line_rect();
+            return;
+        }
+        if idle_closed && is_expanded_rect {
+            self.snap_collapsed_rect();
+            self.pending_rest = None;
+            return;
+        }
+        self.island_rect = r;
+        if idle_closed && !is_expanded_rect {
             self.pending_rest = Some((r, Instant::now()));
         } else if self.pinned || self.ghost_open || is_expanded_rect {
             self.pending_rest = None;
@@ -600,6 +635,9 @@ impl Core {
         self.win.set_ignore_mouse(!on);
         if !on {
             self.win.set_focusable(false);
+            if !self.clickable && !self.pinned && !self.ghost_open {
+                self.snap_collapsed_rect();
+            }
         } else {
             self.ghost = false;
         }
@@ -687,14 +725,19 @@ impl Core {
         let fy = (r.y - y).max(0.0).max(y - r.y - r.height);
         self.cursor_far = !self.calc_active() && fx.hypot(fy) > FAR_PX;
         self.send_near(x, y, fx.hypot(fy));
-        // Generous edge padding while open so approaching an edge/button never collapses the island;
-        // extend the docked screen edge flush to 0 so pushing the pointer against the top/side screen
-        // border stays inside.
-        let pad = if self.active { 14.0 } else if self.line { 8.0 } else { 3.0 };
-        let min_x = if self.vertical() && self.side() == "left" { -6.0 } else { r.x - pad };
-        let max_x = if self.vertical() && self.side() == "right" { WIN_W + 6.0 } else { r.x + r.width + pad };
-        let min_y = if !self.vertical() && (self.docked() || self.line || r.y <= 14.0) { -6.0 } else { r.y - pad };
-        let max_y = r.y + r.height + pad;
+        // Tight hit-testing when collapsed (especially the 96x6 Chrome thin line, so approaching
+        // browser tabs 1 cm away never triggers it); comfortable edge margin while actively open.
+        let (pad_x, pad_y) = if self.active {
+            (8.0, 8.0)
+        } else if self.line {
+            (1.0, 2.0)
+        } else {
+            (2.0, 2.0)
+        };
+        let min_x = if self.vertical() && self.side() == "left" { -6.0 } else { r.x - pad_x };
+        let max_x = if self.vertical() && self.side() == "right" { WIN_W + 6.0 } else { r.x + r.width + pad_x };
+        let min_y = if !self.vertical() && (self.docked() || self.line || r.y <= 14.0) { -6.0 } else { r.y - pad_y };
+        let max_y = r.y + r.height + pad_y;
         let in_island = r.width > 0.0 && r.height > 0.0 && x >= min_x && x <= max_x && y >= min_y && y <= max_y;
         let c = self.calc_rect;
         let in_calc = self.calc_active() && c.width > 0.0 && c.height > 0.0 && x >= c.x - 4.0 && x <= c.x + c.width + 4.0 && y >= c.y - 4.0 && y <= c.y + c.height + 4.0;
@@ -788,12 +831,10 @@ impl Core {
     pub fn next_poll_ms(&self) -> u32 {
         if !self.win.visible() {
             600
-        } else if self.calc_active() {
+        } else if self.calc_active() || !self.cursor_far {
             20
-        } else if self.cursor_far {
-            100
         } else {
-            40
+            80
         }
     }
 
@@ -1052,11 +1093,11 @@ mod tests {
         assert!(core.active());
         assert!(core.inside());
 
-        // Stepping slightly past the edge for 100ms (< LEAVE_GRACE_MS) must NOT collapse
+        // Stepping slightly past the edge for 20ms (< LEAVE_GRACE_MS) must NOT collapse
         let (wx, wy) = core.win.pos();
         core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(400));
-        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(500));
-        assert!(core.active(), "brief slip past edge must not collapse open island");
+        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(420));
+        assert!(core.active(), "brief 1-frame slip past edge must not collapse open island");
 
         // Holding left mouse button down outside the edge keeps interaction alive
         core.poll_cursor_state(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(800), true);
@@ -1066,9 +1107,54 @@ mod tests {
         core.poll_cursor_at(cx, cy, t0 + Duration::from_millis(840));
         assert!(core.active());
 
-        // Actually leaving for >= LEAVE_GRACE_MS collapses cleanly
+        // Actually leaving for >= LEAVE_GRACE_MS collapses promptly
         core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(900));
-        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(1200));
-        assert!(!core.active(), "sustained exit must collapse cleanly");
+        core.poll_cursor_at(wx - 30.0, wy + 200.0, t0 + Duration::from_millis(950));
+        assert!(!core.active(), "sustained exit must collapse promptly");
+    }
+
+    #[test]
+    fn thin_line_in_chrome_never_triggers_1cm_away_and_opens_closes_promptly() {
+        let (mut core, _) = test_core();
+        core.features.set(&json!({ "browserLine": true, "addrIsland": false }));
+        core.place_window();
+        let (wx, wy) = core.win.pos();
+        core.on_browser(&json!({ "x": wx as i32, "y": wy as i32, "w": 1200, "h": 800 }));
+        assert!(core.is_line(), "browser over top tabs must enter thin-line mode");
+        assert_eq!(core.island_rect.width, THIN_LINE_W);
+        assert_eq!(core.island_rect.height, THIN_LINE_H);
+
+        // Simulate stale mid-shrink DOM rect arriving right after close — must be ignored
+        core.set_island_rect(Rect { x: 46.0, y: 0.0, width: 548.0, height: 232.0 });
+        assert_eq!(core.island_rect.width, THIN_LINE_W);
+        assert_eq!(core.island_rect.height, THIN_LINE_H);
+
+        let line_cx = wx + core.island_rect.x + THIN_LINE_W / 2.0;
+        let t0 = Instant::now();
+        // Cursor 15px (~0.4cm) and 38px (~1cm) below the thin line must NEVER open it
+        for dy in [15.0, 38.0] {
+            core.poll_cursor_at(line_cx, wy + dy, t0);
+            core.poll_cursor_at(line_cx, wy + dy, t0 + Duration::from_millis(500));
+            assert!(!core.active(), "cursor {dy}px below thin line must never trigger island");
+        }
+        // Cursor 20px to the left/right of the thin line must NEVER open it
+        core.poll_cursor_at(wx + core.island_rect.x - 20.0, wy + 2.0, t0 + Duration::from_millis(600));
+        core.poll_cursor_at(wx + core.island_rect.x - 20.0, wy + 2.0, t0 + Duration::from_millis(900));
+        assert!(!core.active(), "cursor beside thin line must never trigger island");
+
+        // Directly hovering the 96x6 thin line opens promptly (~50ms)
+        let t1 = t0 + Duration::from_millis(1000);
+        core.poll_cursor_at(line_cx, wy + 3.0, t1);
+        core.poll_cursor_at(line_cx, wy + 3.0, t1 + Duration::from_millis(55));
+        assert!(core.active(), "directly hovering the thin line must open promptly");
+
+        // Moving away collapses promptly (~45ms) and immediately snaps hit-box back to 96x6
+        core.set_island_rect(Rect { x: 46.0, y: 0.0, width: 548.0, height: 232.0 });
+        let t2 = t1 + Duration::from_millis(200);
+        core.poll_cursor_at(line_cx, wy + 290.0, t2);
+        core.poll_cursor_at(line_cx, wy + 290.0, t2 + Duration::from_millis(45));
+        assert!(!core.active(), "moving away must collapse promptly");
+        assert_eq!(core.island_rect.width, THIN_LINE_W, "hit-box must snap back to thin line immediately on close");
+        assert_eq!(core.island_rect.height, THIN_LINE_H);
     }
 }

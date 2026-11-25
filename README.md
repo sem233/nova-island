@@ -62,6 +62,14 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.16
+
+**Exact Chrome "Thin line" hit-box & instant hover-in / hover-out** — snaps the native hit-box immediately to the exact `96×6` top bar on collapse and ignores stale shrinking rects (ending premature triggers ~1 cm away from Chrome tabs), wakes `reportLoop` immediately instead of waiting 2.5 s, removes the redundant 160 ms JS hover-out delay, lowers dwell/leave timers to 45 ms / 35 ms at 60 Hz cursor polling, and debounces WebView2 `LOW`-memory mode by 20 s so opening and closing are crisp and instantaneous with zero compositor stall.
+
+**Reliable Prayer Timings, Native Wake Alarms & Improved Adhan/Iqama UX** — adds a native Win32 `TIMER_PRAYER` wake alarm in Rust so Pre-Prayer, Adhan, and Iqama alerts fire on the exact second even when WebView2 is idle/throttled/hidden; queues Iqama cleanly after active Adhan audio instead of getting hidden behind the Adhan scene; prevents bell chime clashing with Adhan MP3; adds **Calculation method**, **Time adjustment (`-15..+15 min`)**, a **Test prayer alert** button, clearer **Hanafi Asr** guidance, and renames the Adhan reset button to **Remove file** so downloaded reciters aren't accidentally removed.
+
+**One-Click Windows Cache Cleaner & RAM Booster** — adds a sleek ⚡ topbar button opening an animated theme-aware **RAM & Cache Boost** sheet inside the island (0% idle overhead) that safely cleans Windows temp caches (`%TEMP%`, `CrashDumps`, `D3DSCache`, `INetCache`, `Windows\Temp`), flushes DNS cache, trims process working sets via Win32 `K32EmptyWorkingSet`, and reports exact freed RAM and cache MB in real time.
+
 ## What's new in 1.8.15
 
 **Accurate consecutive browser video tracking & downloading** — ranks Windows SMTC sessions by active playback and foreground browser window, includes video duration in change detection, and always re-probes the live foreground browser URL when clicking Download so watching multiple videos back-to-back updates Media immediately and downloads the current video rather than an older one.

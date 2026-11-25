@@ -10,6 +10,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod adhan;
+mod boost;
 mod bus;
 mod core;
 mod files;
@@ -66,6 +67,8 @@ const TIMER_DRAG: usize = 2;
 const TIMER_CAPTURE: usize = 3;
 const TIMER_SUSPEND: usize = 4;
 const TIMER_FINISH: usize = 5;
+const TIMER_LOW_MEM: usize = 6;
+const TIMER_PRAYER: usize = 7;
 const WM_WTSSESSION_CHANGE: u32 = 0x02B1;
 const HOTKEY_TOGGLE: i32 = 1;
 const HOTKEY_SNIP: i32 = 2;
@@ -81,6 +84,7 @@ thread_local! {
     static CALC_BTN_DOWN: Cell<bool> = const { Cell::new(false) };
     static PAGE_SUSPENDED: Cell<bool> = const { Cell::new(false) };
     static PAGE_LOW_MEM: Cell<bool> = const { Cell::new(false) };
+    static LOW_MEM_ARMED: Cell<bool> = const { Cell::new(false) };
 }
 
 pub fn remember_calc_prev_fg(island_hwnd: HWND) {
@@ -104,21 +108,49 @@ pub fn restore_calc_prev_fg(island_hwnd: HWND) {
     }
 }
 
-/// Syncs WebView2 memory target and system stats polling with whether the island is currently open.
+/// Syncs WebView2 memory target and system stats polling with island interaction.
+/// Wakes to NORMAL immediately when open or when the cursor approaches, and defers dropping back
+/// to LOW by 8 seconds so hover-in and hover-out never stutter on Chromium memory throttling.
 fn sync_page_power(a: &Rc<RefCell<App>>) {
-    let (open, slow, visible, page, system) = {
+    let (hwnd, awake_for_user, slow, visible, page, system) = {
         let s = a.borrow();
-        (s.core.is_open(), s.glass.perf(&s.core.features).slow(), s.core.win.visible(), s.page.clone(), s.system.clone())
+        let awake = s.core.is_open() || s.core.inside() || s.core.cursor_near();
+        (s.core.win.hwnd, awake, s.glass.perf(&s.core.features).slow(), s.core.win.visible(), s.page.clone(), s.system.clone())
     };
     if !visible {
         return;
     }
-    let want_low = !open;
-    if PAGE_LOW_MEM.with(|m| m.replace(want_low)) != want_low {
-        if let Some(p) = page {
-            p.set_low_memory(want_low);
+    if awake_for_user {
+        if LOW_MEM_ARMED.with(|armed| armed.replace(false)) {
+            unsafe {
+                let _ = KillTimer(Some(hwnd), TIMER_LOW_MEM);
+            }
         }
-        system.set_stats_every(if slow || want_low { 5000 } else { 2000 });
+        if PAGE_LOW_MEM.with(|m| m.replace(false)) {
+            if let Some(p) = page {
+                p.set_low_memory(false);
+            }
+            system.set_stats_every(if slow { 5000 } else { 2000 });
+        }
+    } else if !PAGE_LOW_MEM.with(|m| m.get()) && !LOW_MEM_ARMED.with(|armed| armed.replace(true)) {
+        unsafe {
+            SetTimer(Some(hwnd), TIMER_LOW_MEM, 8_000, None);
+        }
+    }
+}
+
+/// Arms or clears the native Win32 alarm timer for the very next Prayer / Pre-Prayer / Iqama event.
+pub fn sync_prayer_alarm(a: &Rc<RefCell<App>>) {
+    let (hwnd, delay_ms) = {
+        let s = a.borrow();
+        (s.core.win.hwnd, s.prayer.next_alert_ms())
+    };
+    unsafe {
+        let _ = KillTimer(Some(hwnd), TIMER_PRAYER);
+        if let Some(ms) = delay_ms {
+            // +150ms guards against Windows timer coalescing firing slightly before wall-clock minute boundary
+            SetTimer(Some(hwnd), TIMER_PRAYER, ms.saturating_add(150).clamp(1000, 86_400_000) as u32, None);
+        }
     }
 }
 
@@ -158,10 +190,17 @@ pub fn ensure_page_awake(a: &Rc<RefCell<App>>) {
     };
     unsafe {
         let _ = KillTimer(Some(hwnd), TIMER_SUSPEND);
+        let _ = KillTimer(Some(hwnd), TIMER_LOW_MEM);
     }
+    LOW_MEM_ARMED.with(|armed| armed.set(false));
     if PAGE_SUSPENDED.with(|p| p.replace(false)) {
-        if let Some(p) = page {
+        if let Some(p) = page.clone() {
             p.set_suspended(false);
+        }
+    }
+    if PAGE_LOW_MEM.with(|m| m.replace(false)) {
+        if let Some(p) = page {
+            p.set_low_memory(false);
         }
     }
     if visible {
@@ -528,6 +567,8 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                             drop(s);
                             if can_suspend {
                                 if let Some(p) = page {
+                                    let _ = KillTimer(Some(h), TIMER_LOW_MEM);
+                                    LOW_MEM_ARMED.with(|armed| armed.set(false));
                                     PAGE_SUSPENDED.with(|ps| ps.set(true));
                                     PAGE_LOW_MEM.with(|m| m.set(true));
                                     p.set_suspended(true);
@@ -541,6 +582,28 @@ extern "system" fn wndproc(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                         if let Some(p) = page {
                             p.run("window.tickTimerNow?.()");
                         }
+                    } else if w.0 == TIMER_LOW_MEM {
+                        let _ = KillTimer(Some(h), TIMER_LOW_MEM);
+                        LOW_MEM_ARMED.with(|armed| armed.set(false));
+                        let (still_idle, page, system) = {
+                            let s = a.borrow();
+                            let idle = s.core.win.visible() && !s.core.is_open() && !s.core.inside() && !s.core.cursor_near();
+                            (idle, s.page.clone(), s.system.clone())
+                        };
+                        if still_idle && !PAGE_LOW_MEM.with(|m| m.replace(true)) {
+                            if let Some(p) = page {
+                                p.set_low_memory(true);
+                            }
+                            system.set_stats_every(5000);
+                        }
+                    } else if w.0 == TIMER_PRAYER {
+                        let _ = KillTimer(Some(h), TIMER_PRAYER);
+                        ensure_page_awake(&a);
+                        let page = a.borrow().page.clone();
+                        if let Some(p) = page {
+                            p.run("window.prayerTick?.()");
+                        }
+                        sync_prayer_alarm(&a);
                     }
                 }
                 return LRESULT(0);
@@ -719,6 +782,9 @@ fn drain_bus(a: &Rc<RefCell<App>>) {
                 if matches!(ch.as_str(), "update" | "update-now" | "radio-play" | "app-notify") {
                     ensure_page_awake(a);
                 }
+                if ch == "prayer" {
+                    sync_prayer_alarm(a);
+                }
                 if ch == "stats" && PAGE_SUSPENDED.with(|p| p.get()) {
                     continue;
                 }
@@ -753,9 +819,18 @@ pub fn features_changed(a: &Rc<RefCell<App>>, before: &Value) {
     let slow = s.glass.perf(&s.core.features).slow();
     let low = !s.core.is_open();
     s.system.set_stats_every(if slow || low { 5000 } else { 2000 });
-    if now["asrHanafi"] != before["asrHanafi"] || now["hijriAdjust"] != before["hijriAdjust"] {
+    if now["asrHanafi"] != before["asrHanafi"]
+        || now["hijriAdjust"] != before["hijriAdjust"]
+        || now["prayerMethod"] != before["prayerMethod"]
+        || now["prayerOffsetMin"] != before["prayerOffsetMin"]
+    {
         s.prayer.refresh();
     }
+    let prayer_alert_cfg_changed = now["prayerAlerts"] != before["prayerAlerts"]
+        || now["prayerSoonMin"] != before["prayerSoonMin"]
+        || now["iqamaAlert"] != before["iqamaAlert"]
+        || now["iqamaDelayMin"] != before["iqamaDelayMin"]
+        || now["iqamaBeforeMin"] != before["iqamaBeforeMin"];
     if now["clipboardHistory"] != before["clipboardHistory"]
         || now["clipPersist"] != before["clipPersist"]
         || now["clipMaxItems"] != before["clipMaxItems"]
@@ -787,6 +862,12 @@ pub fn features_changed(a: &Rc<RefCell<App>>, before: &Value) {
         drop(s);
         nova_render::desktop::time_format(now["clock24"] == true);
         crate::prefs::send(a, "widgets", crate::widgets::get_with_previews());
+        if prayer_alert_cfg_changed {
+            sync_prayer_alarm(a);
+        }
+    } else if prayer_alert_cfg_changed {
+        drop(s);
+        sync_prayer_alarm(a);
     }
 }
 
@@ -1296,6 +1377,7 @@ fn run() -> Result<(), String> {
             let s = app_rc.borrow();
             s.system.start();
             s.prayer.start();
+            let has_prayer_cache = s.prayer.snapshot().is_object();
             s.network.start();
             s.privacy.start();
             s.apps.init();
@@ -1324,6 +1406,10 @@ fn run() -> Result<(), String> {
             }
             if (startup::installed() && !startup::store()) || arg("--update-feed").is_some() {
                 s.updater.start();
+            }
+            drop(s);
+            if has_prayer_cache {
+                sync_prayer_alarm(&app_rc);
             }
         }
     }

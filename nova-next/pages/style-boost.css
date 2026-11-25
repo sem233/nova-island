@@ -1,0 +1,297 @@
+/* ============================================================
+   Windows Cache Cleaner & RAM Booster (style-boost.css, 1.8.16)
+   Sleek slide-over utility card inside the expanded island:
+   compositor-only motion, native <progress> spinner, full theme
+   inheritance, and prefers-reduced-motion support.
+   ============================================================ */
+
+.gear.boost-btn {
+  transition: color var(--dur-fast), background var(--dur-fast), transform 80ms ease-out;
+}
+.gear.boost-btn:hover {
+  transform: none;
+  color: rgb(var(--accent-rgb));
+  background: var(--fill-1);
+}
+.gear.boost-btn:active {
+  transform: scale(0.92);
+}
+.gear.boost-btn.active {
+  color: rgb(var(--accent-rgb));
+  background: rgba(var(--accent-rgb), 0.2);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.42);
+}
+.gear.boost-btn:focus-visible,
+.boost-close:focus-visible,
+.boost-go:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.9);
+  outline-offset: 2px;
+}
+
+/* Slide-over card covering .views inside .l-expanded */
+.boost-sheet {
+  position: absolute;
+  inset: 42px 12px 12px 12px;
+  z-index: 14;
+  border-radius: 18px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(16, 18, 26, 0.94);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14), 0 12px 32px rgba(0, 0, 0, 0.48);
+  opacity: 0;
+  transform: translate3d(0, 8px, 0) scale(0.98);
+  pointer-events: none;
+  transition: opacity 160ms ease-out, transform 180ms ease-out;
+}
+body[data-theme] .boost-sheet {
+  background: var(--th-prev, rgba(16, 18, 26, 0.96));
+  box-shadow: inset 0 0 0 1px var(--th-line, rgba(255, 255, 255, 0.14)), 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+body[data-theme="nody"] .boost-sheet {
+  background: rgba(255, 241, 247, 0.96);
+  color: var(--th-text);
+}
+.boost-sheet[hidden] {
+  display: none;
+}
+.boost-sheet.open {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+  pointer-events: auto;
+}
+
+.boost-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.boost-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.boost-title svg {
+  width: 15px;
+  height: 15px;
+  color: rgb(var(--accent-rgb));
+}
+.boost-close {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+  background: var(--fill-1);
+  transition: background var(--dur-fast), color var(--dur-fast);
+}
+.boost-close:hover {
+  background: var(--fill-2);
+  color: var(--text-1);
+}
+.boost-close svg {
+  width: 12px;
+  height: 12px;
+}
+
+.boost-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Animated RAM Ring */
+.boost-gauge {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.boost-gauge svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.boost-gauge circle {
+  fill: none;
+  stroke-width: 7;
+  stroke-linecap: round;
+}
+.boost-gauge .trk {
+  stroke: var(--fill-2);
+}
+.boost-gauge .val {
+  stroke: var(--green, #30d158);
+  stroke-dasharray: 263.89;
+  stroke-dashoffset: 263.89;
+  transition: stroke-dashoffset 480ms var(--ease-out, ease-out), stroke 250ms ease;
+}
+.boost-gauge.warn .val { stroke: var(--orange, #ff9f0a); }
+.boost-gauge.hot .val { stroke: var(--red, #ff453a); }
+.boost-gauge-txt {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.boost-gauge-txt b {
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+.boost-gauge-txt small {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.boost-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.boost-chips {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.boost-chip {
+  padding: 7px 10px;
+  border-radius: 11px;
+  background: var(--fill-1);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.boost-chip span {
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.boost-chip b {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.boost-chip.done b {
+  color: var(--green, #30d158);
+}
+
+.boost-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.boost-go {
+  flex: none;
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 99px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: rgb(var(--accent-rgb));
+  color: #07121f;
+  font-size: 12.5px;
+  font-weight: 700;
+  transition: transform 120ms ease-out, filter 140ms ease, opacity 140ms ease;
+}
+.boost-go:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.boost-go:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.boost-go:disabled {
+  opacity: 0.78;
+  cursor: wait;
+}
+.boost-go svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.boost-msg {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.boost-msg.ok {
+  color: var(--green, #30d158);
+}
+
+/* Native indeterminate <progress> spinner (modern-web-guidance spinner pattern) */
+progress.boost-spin {
+  display: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  appearance: none;
+  background: conic-gradient(from 0deg, currentColor 240deg, transparent 0);
+  -webkit-mask-image: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  mask-image: radial-gradient(farthest-side, transparent calc(100% - 2.5px), #000 calc(100% - 2px));
+  --boost-spin-dur: 0.9s;
+  animation: boost-rot var(--boost-spin-dur) linear infinite;
+}
+progress.boost-spin::-webkit-progress-bar,
+progress.boost-spin::-webkit-progress-value {
+  display: none;
+  background: none;
+}
+.boost-go.busy progress.boost-spin {
+  display: inline-block;
+}
+.boost-go.busy svg {
+  display: none;
+}
+
+@keyframes boost-rot {
+  to { rotate: 1turn; }
+}
+
+@media (forced-colors: active) {
+  progress.boost-spin {
+    forced-color-adjust: none;
+    background: conic-gradient(from 0deg, ButtonText 240deg, transparent 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .boost-sheet { transition: opacity 120ms ease; transform: none; }
+  .boost-sheet.open { transform: none; }
+  .boost-gauge .val { transition: none; }
+  progress.boost-spin { --boost-spin-dur: 6s; }
+}

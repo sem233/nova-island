@@ -282,3 +282,7 @@ body[data-theme="nody"] #net-ping[data-grade="bad"], body[data-theme="nody"] #i-
 .presets .sw-btn:hover { background: rgba(var(--accent-rgb), .26); }
 .presets .sw-btn:active { transform: scale(.94); }
 .presets .sw-btn.sel { background: rgb(var(--accent-rgb)); color: #08121f; }
+
+/* (1.8.16) Crisp, instant open & collapse transitions (eliminates sluggish hover-in / hover-out feel) */
+#island.expanded { --dur-morph: 240ms; }
+#island.shrinking { --dur-morph: 185ms; }
