@@ -62,6 +62,10 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.18
+
+- **Boost panel visual polish & RTL BiDi fix**: Fixed Chromium's native green/gray `<progress>` bar bleeding over the circular RAM gauge ring (caused by combined vendor pseudo-element selectors), separated the crisp circular arc renderer from the semantic screen-reader `<progress>` element, and isolated `GB`/`MB` units in Arabic RTL so numbers and capacity ratios display cleanly without flipping or clipping.
+
 ## What's new in 1.8.17
 
 - **High-effectiveness deep Cache Cleaner & RAM Booster**: Expands cleanup to cover Windows Temp, INetCache, WER/CrashDumps, stale Explorer thumbcaches, GPU shader caches (DirectX/AMD/NVIDIA/Intel), Chromium/Firefox disposable caches (`Cache_Data`, `Code Cache`, `GPUCache`, `GrShaderCache` — never cookies, logins, or history), and heavy desktop app caches (Discord, VS Code, Steam, Spotify), paired with largest-first two-pass process working-set trimming (`SetProcessWorkingSetSizeEx` + `K32EmptyWorkingSet`), DNS flush, heap compaction, and kernel Standby/Modified list purge + Memory Combining when elevated.

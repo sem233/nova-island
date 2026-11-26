@@ -1,4 +1,4 @@
-// Windows Cache Cleaner & RAM Booster UI (views/boost.js, 1.8.17).
+// Windows Cache Cleaner & RAM Booster UI (views/boost.js, 1.8.18).
 // Zero idle polling: scans on open, syncs live with bridge.onStats while open, and streams
 // real-time Rust `boost-progress` snapshots so the circular RAM ring empties smoothly in lockstep
 // with actual OS cache deletion & physical memory reclamation.
@@ -19,6 +19,17 @@
   window.matchMedia?.('(prefers-reduced-motion: reduce)')?.addEventListener?.('change', (e) => {
     reducedMotion = e.matches;
   });
+
+  // LRI/PDI Unicode directional isolates keep "1.6 GB" / "312 MB" crisp inside Arabic RTL text
+  const ltr = (s) => `\u2066${s}\u2069`;
+  const fmtGb = (mb) => (mb >= 1000 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
+  const fmtMb = (v) => (v >= 1000 ? `${(v / 1024).toFixed(2)} GB` : `${v.toFixed(v < 10 ? 1 : 0)} MB`);
+  const fmtUsedPair = (usedMb, totalMb) => {
+    if (totalMb >= 1024) {
+      return `${(usedMb / 1024).toFixed(1)} / ${(totalMb / 1024).toFixed(1)} GB`;
+    }
+    return `${Math.round(usedMb)} / ${Math.round(totalMb)} MB`;
+  };
 
   const T = {
     en: {
@@ -46,18 +57,16 @@
       summary: (r) => {
         const drop = r.beforePct > r.afterPct ? `${r.beforePct}% → ${r.afterPct}% · ` : '';
         const parts = [];
-        if (r.ramFreedMb > 0) parts.push(`${T.en.gb(r.ramFreedMb)} RAM`);
-        if (r.cacheFreedMb > 0) parts.push(`${T.en.mb(r.cacheFreedMb)} cache`);
-        if (!parts.length && r.wsTrimmedMb > 0) parts.push(`${T.en.gb(r.wsTrimmedMb)} trimmed`);
+        if (r.ramFreedMb > 0) parts.push(`${fmtGb(r.ramFreedMb)} RAM`);
+        if (r.cacheFreedMb > 0) parts.push(`${fmtMb(r.cacheFreedMb)} cache`);
+        if (!parts.length && r.wsTrimmedMb > 0) parts.push(`${fmtGb(r.wsTrimmedMb)} trimmed`);
         if (!parts.length) return `Already optimized (${r.procsTrimmed || 0} apps checked)`;
         return `${drop}Freed ${parts.join(' · ')}`;
       },
       detail: (r) =>
-        `RAM: ${r.beforePct}% → ${r.afterPct}% (${T.en.gb(r.ramFreedMb)} free, ${T.en.gb(r.wsTrimmedMb)} working set trimmed) | ` +
-        `Cache: ${T.en.mb(r.cacheFreedMb)} (${r.filesCleaned} files) | Apps: ${r.procsTrimmed} | DNS: ${r.dnsFlushed ? 'flushed' : 'skipped'}` +
+        `RAM: ${r.beforePct}% → ${r.afterPct}% (${fmtGb(r.ramFreedMb)} free, ${fmtGb(r.wsTrimmedMb)} working set trimmed) | ` +
+        `Cache: ${fmtMb(r.cacheFreedMb)} (${r.filesCleaned} files) | Apps: ${r.procsTrimmed} | DNS: ${r.dnsFlushed ? 'flushed' : 'skipped'}` +
         (r.standbyPurged ? ' | Standby: purged' : ''),
-      gb: (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`),
-      mb: (v) => (v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${v.toFixed(v < 10 ? 1 : 0)} MB`),
     },
     ar: {
       title: 'تنظيف الكاش وتسريع الرامات',
@@ -68,7 +77,7 @@
       cache: 'كاش الويندوز والمتصفح',
       go: 'تنظيف وتسريع',
       working: 'جارٍ التسريع…',
-      ready: 'تنظيف عميق لكاش الويندوز والمتصفحات وتفريغ الرامات',
+      ready: 'ضغطة لتنظيف الكاش وتفريغ الرام',
       btnTip: 'تنظيف الكاش وتسريع الرامات',
       stages: {
         cache: 'جارٍ تنظيف ملفات الكاش المؤقتة…',
@@ -77,25 +86,23 @@
         browser: 'جارٍ تنظيف كاش المتصفحات…',
         apps: 'جارٍ تنظيف كاش التطبيقات…',
         dns: 'جارٍ تفريغ كاش الشبكة DNS…',
-        ram: (p, tot) => (tot > 0 ? `جارٍ تفريغ الرامات (${p}/${tot} تطبيق)…` : 'جارٍ تفريغ الرامات…'),
+        ram: (p, tot) => (tot > 0 ? `تفريغ الرامات (${ltr(`${p}/${tot}`)} تطبيق)…` : 'جارٍ تفريغ الرامات…'),
         memory: 'جارٍ ضغط وتحسين الذاكرة…',
         done: 'اكتمل التنظيف والتسريع',
       },
       summary: (r) => {
-        const drop = r.beforePct > r.afterPct ? `${r.beforePct}% ← ${r.afterPct}% · ` : '';
+        const drop = r.beforePct > r.afterPct ? `${ltr(`${r.beforePct}%`)} ← ${ltr(`${r.afterPct}%`)} · ` : '';
         const parts = [];
-        if (r.ramFreedMb > 0) parts.push(`${T.ar.gb(r.ramFreedMb)} رام`);
-        if (r.cacheFreedMb > 0) parts.push(`${T.ar.mb(r.cacheFreedMb)} كاش`);
-        if (!parts.length && r.wsTrimmedMb > 0) parts.push(`${T.ar.gb(r.wsTrimmedMb)} مضغوطة`);
+        if (r.ramFreedMb > 0) parts.push(`${ltr(fmtGb(r.ramFreedMb))} رام`);
+        if (r.cacheFreedMb > 0) parts.push(`${ltr(fmtMb(r.cacheFreedMb))} كاش`);
+        if (!parts.length && r.wsTrimmedMb > 0) parts.push(`${ltr(fmtGb(r.wsTrimmedMb))} مضغوطة`);
         if (!parts.length) return `الجهاز محسّن بالفعل (${r.procsTrimmed || 0} تطبيق)`;
-        return `${drop}تم تفريغ ${parts.join(' · ')}`;
+        return `${drop}فُرّغ ${parts.join(' · ')}`;
       },
       detail: (r) =>
-        `الرام: ${r.beforePct}% ← ${r.afterPct}% (${T.ar.gb(r.ramFreedMb)} متاحة، ${T.ar.gb(r.wsTrimmedMb)} ضغط عمليات) | ` +
-        `الكاش: ${T.ar.mb(r.cacheFreedMb)} (${r.filesCleaned} ملف) | التطبيقات: ${r.procsTrimmed}` +
+        `الرام: ${ltr(`${r.beforePct}%`)} ← ${ltr(`${r.afterPct}%`)} (${ltr(fmtGb(r.ramFreedMb))} متاحة، ${ltr(fmtGb(r.wsTrimmedMb))} ضغط عمليات) | ` +
+        `الكاش: ${ltr(fmtMb(r.cacheFreedMb))} (${r.filesCleaned} ملف) | التطبيقات: ${r.procsTrimmed}` +
         (r.standbyPurged ? ' | تم تفريغ Standby' : ''),
-      gb: (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`),
-      mb: (v) => (v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${v.toFixed(v < 10 ? 1 : 0)} MB`),
     },
   };
   const tr = () => (window.state?.features?.prefsLang === 'ar' ? T.ar : T.en);
@@ -114,14 +121,15 @@
     '<div class="boost-body">' +
       '<div class="boost-gauge" id="boost-gauge">' +
         '<div class="boost-halo" aria-hidden="true"></div>' +
-        '<progress class="boost-ring" id="boost-ring" value="0" max="100" aria-label="RAM usage" aria-valuetext="0%"></progress>' +
-        '<div class="boost-gauge-txt" aria-hidden="true"><b id="boost-pct">--%</b><small id="boost-used">-- / --</small></div>' +
+        '<div class="boost-ring-vis" id="boost-ring-vis" aria-hidden="true"></div>' +
+        '<progress class="boost-sr" id="boost-ring" value="0" max="100" aria-label="RAM usage" aria-valuetext="0%"></progress>' +
+        '<div class="boost-gauge-txt" aria-hidden="true"><b id="boost-pct" dir="ltr">--%</b><small id="boost-used" dir="ltr">-- / --</small></div>' +
         '<button type="button" class="boost-ring-hit" id="boost-ring-hit" aria-label="Boost & Clean"></button>' +
       '</div>' +
       '<div class="boost-right">' +
         '<div class="boost-chips">' +
-          '<div class="boost-chip" id="boost-ram-chip"><span id="boost-avail-lbl"></span><b id="boost-avail">--</b></div>' +
-          '<div class="boost-chip" id="boost-cache-chip"><span id="boost-cache-lbl"></span><b id="boost-cache">--</b></div>' +
+          '<div class="boost-chip" id="boost-ram-chip"><span id="boost-avail-lbl"></span><b id="boost-avail" dir="ltr">--</b></div>' +
+          '<div class="boost-chip" id="boost-cache-chip"><span id="boost-cache-lbl"></span><b id="boost-cache" dir="ltr">--</b></div>' +
         '</div>' +
         '<div class="boost-foot">' +
           '<button type="button" class="boost-go" id="boost-go">' +
@@ -135,7 +143,8 @@
     '</div>';
   host.append(sheet);
 
-  const ring = sheet.querySelector('#boost-ring');
+  const ringSr = sheet.querySelector('#boost-ring');
+  const ringVis = sheet.querySelector('#boost-ring-vis');
   const ringHit = sheet.querySelector('#boost-ring-hit');
   const gauge = sheet.querySelector('#boost-gauge');
   const pctEl = sheet.querySelector('#boost-pct');
@@ -158,7 +167,7 @@
     sheet.querySelector('#boost-ttl').textContent = t.title;
     sheet.querySelector('#boost-avail-lbl').textContent = t.avail;
     sheet.querySelector('#boost-cache-lbl').textContent = t.cache;
-    ring.setAttribute('aria-label', t.ringLabel);
+    ringSr.setAttribute('aria-label', t.ringLabel);
     ringHit.setAttribute('aria-label', t.ringAction);
     ringHit.title = t.ringAction;
     closeBtn.setAttribute('aria-label', t.close);
@@ -176,19 +185,23 @@
     syncLang();
   }
 
-  function paintGauge(pct, usedMb, totalMb, availMb) {
-    const t = tr();
-    const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
-    ring.setAttribute('value', String(p));
-    ring.setAttribute('aria-valuetext', `${p}%`);
-    ring.style.setProperty('--boost-val', String(p));
-    pctEl.textContent = `${p}%`;
+  function setRingTarget(p) {
+    const rounded = Math.max(0, Math.min(100, Math.round(Number(p) || 0)));
+    ringSr.setAttribute('value', String(rounded));
+    ringSr.setAttribute('aria-valuetext', `${rounded}%`);
+    ringSr.style.setProperty('--boost-val', String(rounded));
+    ringVis.style.setProperty('--boost-val', String(rounded));
+    gauge.classList.toggle('warn', rounded >= 70 && rounded < 85);
+    gauge.classList.toggle('hot', rounded >= 85);
+    return rounded;
+  }
+
+  function paintText(pct, usedMb, totalMb, availMb) {
+    pctEl.textContent = `${Math.max(0, Math.min(100, Math.round(Number(pct) || 0)))}%`;
     if (totalMb > 0) {
-      usedEl.textContent = `${t.gb(usedMb)} / ${t.gb(totalMb)}`;
-      availEl.textContent = t.gb(availMb);
+      usedEl.textContent = fmtUsedPair(usedMb, totalMb);
+      availEl.textContent = fmtGb(availMb);
     }
-    gauge.classList.toggle('warn', p >= 65 && p < 85);
-    gauge.classList.toggle('hot', p >= 85);
   }
 
   // Smoothly eases displayed RAM counters in lockstep with live Rust progress snapshots
@@ -199,19 +212,14 @@
     const targetAvail = Number(availMb) || 0;
     if (animId) { cancelAnimationFrame(animId); animId = 0; }
 
-    // Set the ring target immediately so CSS @property --boost-val drives the GPU arc transition
-    ring.setAttribute('value', String(Math.round(targetPct)));
-    ring.setAttribute('aria-valuetext', `${Math.round(targetPct)}%`);
-    ring.style.setProperty('--boost-val', String(targetPct));
-    gauge.classList.toggle('warn', targetPct >= 65 && targetPct < 85);
-    gauge.classList.toggle('hot', targetPct >= 85);
+    setRingTarget(targetPct);
 
     if (immediate || reducedMotion || curTotal === 0) {
       curPct = targetPct;
       curUsed = targetUsed;
       curTotal = targetTotal;
       curAvail = targetAvail;
-      paintGauge(curPct, curUsed, curTotal, curAvail);
+      paintText(curPct, curUsed, curTotal, curAvail);
       return;
     }
 
@@ -227,12 +235,7 @@
       curPct = fromPct + (targetPct - fromPct) * e;
       curUsed = fromUsed + (targetUsed - fromUsed) * e;
       curAvail = fromAvail + (targetAvail - fromAvail) * e;
-      const t = tr();
-      pctEl.textContent = `${Math.round(curPct)}%`;
-      if (curTotal > 0) {
-        usedEl.textContent = `${t.gb(curUsed)} / ${t.gb(curTotal)}`;
-        availEl.textContent = t.gb(curAvail);
-      }
+      paintText(curPct, curUsed, curTotal, curAvail);
       if (k < 1) {
         animId = requestAnimationFrame(step);
       } else {
@@ -250,7 +253,7 @@
       const s = await window.nova.boostStats();
       if (!s || busy) return;
       drawGauge(s.ramPct, s.usedMb, s.totalMb, s.availMb, curTotal === 0);
-      const mbStr = tr().mb(Number(s.cacheMb) || 0);
+      const mbStr = fmtMb(Number(s.cacheMb) || 0);
       cacheEl.textContent = s.cachePartial ? `${mbStr}+` : mbStr;
       cacheChip.classList.remove('done', 'active');
       ramChip.classList.remove('done', 'active');
@@ -293,7 +296,7 @@
     ramChip.classList.toggle('active', isRamStage);
 
     if (typeof ev.cacheFreedMb === 'number' && ev.cacheFreedMb > 0) {
-      cacheEl.textContent = `${t.mb(ev.cacheFreedMb)} (${ev.filesCleaned || 0})`;
+      cacheEl.textContent = `${fmtMb(ev.cacheFreedMb)} (${ev.filesCleaned || 0})`;
     }
     const labelFn = t.stages[stage];
     if (typeof labelFn === 'function') {
@@ -327,14 +330,14 @@
     ramChip.classList.remove('done');
     goTxt.textContent = t.working;
     msgEl.classList.remove('ok');
-    msgEl.textContent = t.stages.cache;
+    msgEl.textContent = t.stages.ram(0, 0);
     msgEl.title = '';
     try {
       const r = await window.nova.boostRun();
       if (r) {
         holdUntil = performance.now() + 2800;
         drawGauge(r.afterPct, r.afterUsedMb, r.totalMb, r.availMb, false);
-        const cacheTxt = t.mb(Number(r.cacheFreedMb) || 0);
+        const cacheTxt = fmtMb(Number(r.cacheFreedMb) || 0);
         cacheEl.textContent = r.cacheFreedMb > 0 ? `✓ ${cacheTxt}` : '✓ 0 MB';
         cacheChip.classList.remove('active');
         ramChip.classList.remove('active');
