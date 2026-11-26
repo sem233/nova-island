@@ -1,38 +1,99 @@
-// Windows Cache Cleaner & RAM Booster UI (views/boost.js, 1.8.16).
-// Zero background polling: scans stats only when opened and executes cleanup on a Rust worker thread.
+// Windows Cache Cleaner & RAM Booster UI (views/boost.js, 1.8.17).
+// Zero idle polling: scans on open, syncs live with bridge.onStats while open, and streams
+// real-time Rust `boost-progress` snapshots so the circular RAM ring empties smoothly in lockstep
+// with actual OS cache deletion & physical memory reclamation.
 (() => {
   const btn = document.getElementById('open-boost');
   const host = document.querySelector('.l-expanded');
   if (!btn || !host || !window.nova?.boostStats) return;
 
-  const CIRC = 2 * Math.PI * 42; // 263.89
   let open = false;
   let busy = false;
+  let holdUntil = 0;
+  let curPct = 0;
+  let curUsed = 0;
+  let curTotal = 0;
+  let curAvail = 0;
+  let animId = 0;
+  let reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches || false;
+  window.matchMedia?.('(prefers-reduced-motion: reduce)')?.addEventListener?.('change', (e) => {
+    reducedMotion = e.matches;
+  });
 
   const T = {
     en: {
       title: 'RAM & Cache Boost',
       close: 'Close boost panel',
+      ringLabel: 'RAM usage',
+      ringAction: 'Click to clean cache & free RAM',
       avail: 'Available RAM',
-      cache: 'Windows Cache',
+      cache: 'System & App Cache',
       go: 'Boost & Clean',
-      working: 'Optimizing…',
-      ready: 'One click to clean temp cache & free RAM',
+      working: 'Boosting…',
+      ready: 'Deep clean Windows/browser caches & free RAM',
       btnTip: 'Clean cache & boost RAM',
-      cleaned: (ram, cache, files) => `Freed ${ram} RAM · ${cache} cache (${files} files)`,
+      stages: {
+        cache: 'Cleaning Windows temp cache…',
+        temp: 'Cleaning Windows temp cache…',
+        gpu: 'Cleaning GPU shader caches…',
+        browser: 'Cleaning browser caches…',
+        apps: 'Cleaning app caches…',
+        dns: 'Flushing DNS network cache…',
+        ram: (p, tot) => (tot > 0 ? `Freeing RAM (${p}/${tot} apps)…` : 'Freeing RAM…'),
+        memory: 'Compacting system memory…',
+        done: 'Optimization complete',
+      },
+      summary: (r) => {
+        const drop = r.beforePct > r.afterPct ? `${r.beforePct}% → ${r.afterPct}% · ` : '';
+        const parts = [];
+        if (r.ramFreedMb > 0) parts.push(`${T.en.gb(r.ramFreedMb)} RAM`);
+        if (r.cacheFreedMb > 0) parts.push(`${T.en.mb(r.cacheFreedMb)} cache`);
+        if (!parts.length && r.wsTrimmedMb > 0) parts.push(`${T.en.gb(r.wsTrimmedMb)} trimmed`);
+        if (!parts.length) return `Already optimized (${r.procsTrimmed || 0} apps checked)`;
+        return `${drop}Freed ${parts.join(' · ')}`;
+      },
+      detail: (r) =>
+        `RAM: ${r.beforePct}% → ${r.afterPct}% (${T.en.gb(r.ramFreedMb)} free, ${T.en.gb(r.wsTrimmedMb)} working set trimmed) | ` +
+        `Cache: ${T.en.mb(r.cacheFreedMb)} (${r.filesCleaned} files) | Apps: ${r.procsTrimmed} | DNS: ${r.dnsFlushed ? 'flushed' : 'skipped'}` +
+        (r.standbyPurged ? ' | Standby: purged' : ''),
       gb: (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`),
       mb: (v) => (v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${v.toFixed(v < 10 ? 1 : 0)} MB`),
     },
     ar: {
       title: 'تنظيف الكاش وتسريع الرامات',
       close: 'إغلاق لوحة التنظيف',
+      ringLabel: 'استهلاك الرامات',
+      ringAction: 'اضغط لتنظيف الكاش وتفريغ الرامات',
       avail: 'الرام المتاحة',
-      cache: 'كاش الويندوز',
+      cache: 'كاش الويندوز والمتصفح',
       go: 'تنظيف وتسريع',
-      working: 'جارٍ التنظيف…',
-      ready: 'ضغطة واحدة لتفريغ الكاش وتسريع الرامات',
+      working: 'جارٍ التسريع…',
+      ready: 'تنظيف عميق لكاش الويندوز والمتصفحات وتفريغ الرامات',
       btnTip: 'تنظيف الكاش وتسريع الرامات',
-      cleaned: (ram, cache, files) => `تم تفريغ ${ram} رام · ${cache} كاش (${files} ملف)`,
+      stages: {
+        cache: 'جارٍ تنظيف ملفات الكاش المؤقتة…',
+        temp: 'جارٍ تنظيف كاش الويندوز…',
+        gpu: 'جارٍ تنظيف كاش كارت الشاشة…',
+        browser: 'جارٍ تنظيف كاش المتصفحات…',
+        apps: 'جارٍ تنظيف كاش التطبيقات…',
+        dns: 'جارٍ تفريغ كاش الشبكة DNS…',
+        ram: (p, tot) => (tot > 0 ? `جارٍ تفريغ الرامات (${p}/${tot} تطبيق)…` : 'جارٍ تفريغ الرامات…'),
+        memory: 'جارٍ ضغط وتحسين الذاكرة…',
+        done: 'اكتمل التنظيف والتسريع',
+      },
+      summary: (r) => {
+        const drop = r.beforePct > r.afterPct ? `${r.beforePct}% ← ${r.afterPct}% · ` : '';
+        const parts = [];
+        if (r.ramFreedMb > 0) parts.push(`${T.ar.gb(r.ramFreedMb)} رام`);
+        if (r.cacheFreedMb > 0) parts.push(`${T.ar.mb(r.cacheFreedMb)} كاش`);
+        if (!parts.length && r.wsTrimmedMb > 0) parts.push(`${T.ar.gb(r.wsTrimmedMb)} مضغوطة`);
+        if (!parts.length) return `الجهاز محسّن بالفعل (${r.procsTrimmed || 0} تطبيق)`;
+        return `${drop}تم تفريغ ${parts.join(' · ')}`;
+      },
+      detail: (r) =>
+        `الرام: ${r.beforePct}% ← ${r.afterPct}% (${T.ar.gb(r.ramFreedMb)} متاحة، ${T.ar.gb(r.wsTrimmedMb)} ضغط عمليات) | ` +
+        `الكاش: ${T.ar.mb(r.cacheFreedMb)} (${r.filesCleaned} ملف) | التطبيقات: ${r.procsTrimmed}` +
+        (r.standbyPurged ? ' | تم تفريغ Standby' : ''),
       gb: (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`),
       mb: (v) => (v >= 1024 ? `${(v / 1024).toFixed(2)} GB` : `${v.toFixed(v < 10 ? 1 : 0)} MB`),
     },
@@ -52,8 +113,10 @@
     '</div>' +
     '<div class="boost-body">' +
       '<div class="boost-gauge" id="boost-gauge">' +
-        '<svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="42" class="trk"/><circle cx="50" cy="50" r="42" class="val" id="boost-ring"/></svg>' +
-        '<div class="boost-gauge-txt"><b id="boost-pct">--%</b><small id="boost-used">-- / --</small></div>' +
+        '<div class="boost-halo" aria-hidden="true"></div>' +
+        '<progress class="boost-ring" id="boost-ring" value="0" max="100" aria-label="RAM usage" aria-valuetext="0%"></progress>' +
+        '<div class="boost-gauge-txt" aria-hidden="true"><b id="boost-pct">--%</b><small id="boost-used">-- / --</small></div>' +
+        '<button type="button" class="boost-ring-hit" id="boost-ring-hit" aria-label="Boost & Clean"></button>' +
       '</div>' +
       '<div class="boost-right">' +
         '<div class="boost-chips">' +
@@ -73,6 +136,7 @@
   host.append(sheet);
 
   const ring = sheet.querySelector('#boost-ring');
+  const ringHit = sheet.querySelector('#boost-ring-hit');
   const gauge = sheet.querySelector('#boost-gauge');
   const pctEl = sheet.querySelector('#boost-pct');
   const usedEl = sheet.querySelector('#boost-used');
@@ -94,6 +158,9 @@
     sheet.querySelector('#boost-ttl').textContent = t.title;
     sheet.querySelector('#boost-avail-lbl').textContent = t.avail;
     sheet.querySelector('#boost-cache-lbl').textContent = t.cache;
+    ring.setAttribute('aria-label', t.ringLabel);
+    ringHit.setAttribute('aria-label', t.ringAction);
+    ringHit.title = t.ringAction;
     closeBtn.setAttribute('aria-label', t.close);
     closeBtn.title = t.close;
     btn.title = t.btnTip;
@@ -109,25 +176,85 @@
     syncLang();
   }
 
-  function drawGauge(pct, usedMb, totalMb, availMb) {
+  function paintGauge(pct, usedMb, totalMb, availMb) {
     const t = tr();
-    const p = Math.max(0, Math.min(100, Number(pct) || 0));
+    const p = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+    ring.setAttribute('value', String(p));
+    ring.setAttribute('aria-valuetext', `${p}%`);
+    ring.style.setProperty('--boost-val', String(p));
     pctEl.textContent = `${p}%`;
-    usedEl.textContent = `${t.gb(usedMb)} / ${t.gb(totalMb)}`;
-    availEl.textContent = t.gb(availMb);
-    ring.style.strokeDashoffset = String(CIRC * (1 - p / 100));
+    if (totalMb > 0) {
+      usedEl.textContent = `${t.gb(usedMb)} / ${t.gb(totalMb)}`;
+      availEl.textContent = t.gb(availMb);
+    }
     gauge.classList.toggle('warn', p >= 65 && p < 85);
     gauge.classList.toggle('hot', p >= 85);
+  }
+
+  // Smoothly eases displayed RAM counters in lockstep with live Rust progress snapshots
+  function drawGauge(pct, usedMb, totalMb, availMb, immediate = false) {
+    const targetPct = Math.max(0, Math.min(100, Number(pct) || 0));
+    const targetUsed = Number(usedMb) || 0;
+    const targetTotal = Number(totalMb) || curTotal;
+    const targetAvail = Number(availMb) || 0;
+    if (animId) { cancelAnimationFrame(animId); animId = 0; }
+
+    // Set the ring target immediately so CSS @property --boost-val drives the GPU arc transition
+    ring.setAttribute('value', String(Math.round(targetPct)));
+    ring.setAttribute('aria-valuetext', `${Math.round(targetPct)}%`);
+    ring.style.setProperty('--boost-val', String(targetPct));
+    gauge.classList.toggle('warn', targetPct >= 65 && targetPct < 85);
+    gauge.classList.toggle('hot', targetPct >= 85);
+
+    if (immediate || reducedMotion || curTotal === 0) {
+      curPct = targetPct;
+      curUsed = targetUsed;
+      curTotal = targetTotal;
+      curAvail = targetAvail;
+      paintGauge(curPct, curUsed, curTotal, curAvail);
+      return;
+    }
+
+    const fromPct = curPct;
+    const fromUsed = curUsed;
+    const fromAvail = curAvail;
+    curTotal = targetTotal;
+    const start = performance.now();
+    const dur = 200;
+    const step = (now) => {
+      const k = Math.min(1, (now - start) / dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      curPct = fromPct + (targetPct - fromPct) * e;
+      curUsed = fromUsed + (targetUsed - fromUsed) * e;
+      curAvail = fromAvail + (targetAvail - fromAvail) * e;
+      const t = tr();
+      pctEl.textContent = `${Math.round(curPct)}%`;
+      if (curTotal > 0) {
+        usedEl.textContent = `${t.gb(curUsed)} / ${t.gb(curTotal)}`;
+        availEl.textContent = t.gb(curAvail);
+      }
+      if (k < 1) {
+        animId = requestAnimationFrame(step);
+      } else {
+        animId = 0;
+        curPct = targetPct;
+        curUsed = targetUsed;
+        curAvail = targetAvail;
+      }
+    };
+    animId = requestAnimationFrame(step);
   }
 
   async function refresh() {
     try {
       const s = await window.nova.boostStats();
-      if (!s) return;
-      drawGauge(s.ramPct, s.usedMb, s.totalMb, s.availMb);
-      cacheEl.textContent = tr().mb(Number(s.cacheMb) || 0);
-      cacheChip.classList.remove('done');
-      ramChip.classList.remove('done');
+      if (!s || busy) return;
+      drawGauge(s.ramPct, s.usedMb, s.totalMb, s.availMb, curTotal === 0);
+      const mbStr = tr().mb(Number(s.cacheMb) || 0);
+      cacheEl.textContent = s.cachePartial ? `${mbStr}+` : mbStr;
+      cacheChip.classList.remove('done', 'active');
+      ramChip.classList.remove('done', 'active');
+      gauge.classList.remove('boosted');
     } catch {}
   }
 
@@ -138,14 +265,100 @@
     btn.setAttribute('aria-expanded', String(open));
     if (open) {
       syncLang();
-      msgEl.classList.remove('ok');
-      msgEl.textContent = tr().ready;
+      if (!busy) {
+        msgEl.classList.remove('ok');
+        msgEl.textContent = tr().ready;
+        msgEl.title = '';
+      }
       sheet.hidden = false;
       requestAnimationFrame(() => sheet.classList.add('open'));
       refresh();
     } else {
       sheet.classList.remove('open');
       setTimeout(() => { if (!open) sheet.hidden = true; }, 190);
+    }
+  }
+
+  // Live streaming progress handler from Rust `boost::run_with_progress`
+  window.nova.onBoostProgress?.((ev) => {
+    if (!ev || !busy) return;
+    const t = tr();
+    if (typeof ev.ramPct === 'number') {
+      drawGauge(ev.ramPct, ev.usedMb, ev.totalMb, ev.availMb, false);
+    }
+    const stage = ev.stage || 'cache';
+    const isCacheStage = stage === 'cache' || stage === 'temp' || stage === 'gpu' || stage === 'browser' || stage === 'apps' || stage === 'dns';
+    const isRamStage = stage === 'ram' || stage === 'memory';
+    cacheChip.classList.toggle('active', isCacheStage);
+    ramChip.classList.toggle('active', isRamStage);
+
+    if (typeof ev.cacheFreedMb === 'number' && ev.cacheFreedMb > 0) {
+      cacheEl.textContent = `${t.mb(ev.cacheFreedMb)} (${ev.filesCleaned || 0})`;
+    }
+    const labelFn = t.stages[stage];
+    if (typeof labelFn === 'function') {
+      msgEl.textContent = labelFn(ev.procsTrimmed || 0, ev.procsTotal || 0);
+    } else if (typeof labelFn === 'string') {
+      msgEl.textContent = labelFn;
+    }
+  });
+
+  // Stay in sync with live system stats while open and idle (zero extra polling!)
+  window.nova.onStats?.((s) => {
+    if (!open || busy || performance.now() < holdUntil || !s || !s.ramTotal) return;
+    const totalMb = Math.round(s.ramTotal / 1048576);
+    const usedMb = Math.round(s.ramUsed / 1048576);
+    const availMb = Math.max(0, totalMb - usedMb);
+    const pct = Math.round((s.ram || 0) * 100);
+    drawGauge(pct, usedMb, totalMb, availMb, false);
+  });
+
+  async function runBoost(e) {
+    e?.stopPropagation?.();
+    if (busy) return;
+    busy = true;
+    const t = tr();
+    goBtn.disabled = true;
+    ringHit.disabled = true;
+    goBtn.classList.add('busy');
+    gauge.classList.remove('boosted');
+    gauge.classList.add('boosting');
+    cacheChip.classList.remove('done');
+    ramChip.classList.remove('done');
+    goTxt.textContent = t.working;
+    msgEl.classList.remove('ok');
+    msgEl.textContent = t.stages.cache;
+    msgEl.title = '';
+    try {
+      const r = await window.nova.boostRun();
+      if (r) {
+        holdUntil = performance.now() + 2800;
+        drawGauge(r.afterPct, r.afterUsedMb, r.totalMb, r.availMb, false);
+        const cacheTxt = t.mb(Number(r.cacheFreedMb) || 0);
+        cacheEl.textContent = r.cacheFreedMb > 0 ? `✓ ${cacheTxt}` : '✓ 0 MB';
+        cacheChip.classList.remove('active');
+        ramChip.classList.remove('active');
+        cacheChip.classList.add('done');
+        if ((r.ramFreedMb || 0) > 0 || (r.wsTrimmedMb || 0) > 0) ramChip.classList.add('done');
+        gauge.classList.add('boosted');
+        msgEl.classList.add('ok');
+        msgEl.textContent = tr().summary(r);
+        msgEl.title = tr().detail(r);
+        if ((r.ramFreedMb || 0) >= 64 || (r.cacheFreedMb || 0) >= 10) {
+          window.celebrate?.(['#30d158', '#60a5fa', '#93e4c8']);
+        }
+      }
+    } catch {
+      msgEl.textContent = tr().ready;
+    } finally {
+      busy = false;
+      goBtn.disabled = false;
+      ringHit.disabled = false;
+      goBtn.classList.remove('busy');
+      gauge.classList.remove('boosting');
+      cacheChip.classList.remove('active');
+      ramChip.classList.remove('active');
+      goTxt.textContent = tr().go;
     }
   }
 
@@ -157,39 +370,8 @@
     e.stopPropagation();
     setOpen(false);
   });
-
-  goBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    if (busy) return;
-    busy = true;
-    const t = tr();
-    goBtn.disabled = true;
-    goBtn.classList.add('busy');
-    goTxt.textContent = t.working;
-    msgEl.classList.remove('ok');
-    msgEl.textContent = t.working;
-    try {
-      const r = await window.nova.boostRun();
-      if (r) {
-        drawGauge(r.afterPct, r.afterUsedMb, r.totalMb, r.availMb);
-        const ramTxt = t.gb(Number(r.ramFreedMb) || 0);
-        const cacheTxt = t.mb(Number(r.cacheFreedMb) || 0);
-        cacheEl.textContent = `✓ ${cacheTxt}`;
-        cacheChip.classList.add('done');
-        if ((r.ramFreedMb || 0) > 0) ramChip.classList.add('done');
-        msgEl.classList.add('ok');
-        msgEl.textContent = t.cleaned(ramTxt, cacheTxt, r.filesCleaned || 0);
-        window.celebrate?.(['#30d158', '#60a5fa', '#93e4c8']);
-      }
-    } catch {
-      msgEl.textContent = t.ready;
-    } finally {
-      busy = false;
-      goBtn.disabled = false;
-      goBtn.classList.remove('busy');
-      goTxt.textContent = tr().go;
-    }
-  });
+  goBtn.addEventListener('click', runBoost);
+  ringHit.addEventListener('click', runBoost);
 
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && open) setOpen(false);

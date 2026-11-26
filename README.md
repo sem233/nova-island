@@ -62,6 +62,11 @@ Turn on only what you need from one simple settings window. Vertical on the scre
 
 Requires Windows 10 or 11 (64-bit).
 
+## What's new in 1.8.17
+
+- **High-effectiveness deep Cache Cleaner & RAM Booster**: Expands cleanup to cover Windows Temp, INetCache, WER/CrashDumps, stale Explorer thumbcaches, GPU shader caches (DirectX/AMD/NVIDIA/Intel), Chromium/Firefox disposable caches (`Cache_Data`, `Code Cache`, `GPUCache`, `GrShaderCache` — never cookies, logins, or history), and heavy desktop app caches (Discord, VS Code, Steam, Spotify), paired with largest-first two-pass process working-set trimming (`SetProcessWorkingSetSizeEx` + `K32EmptyWorkingSet`), DNS flush, heap compaction, and kernel Standby/Modified list purge + Memory Combining when elevated.
+- **Live-synchronized RAM progress ring**: Replaces the static ring with a clickable semantic `<progress>` ring driven by real-time streamed `boost-progress` snapshots so the circle visibly empties step-by-step in lockstep with real Windows RAM reclamation and immediately refreshes the island's live RAM readout.
+
 ## What's new in 1.8.16
 
 **Exact Chrome "Thin line" hit-box & instant hover-in / hover-out** — snaps the native hit-box immediately to the exact `96×6` top bar on collapse and ignores stale shrinking rects (ending premature triggers ~1 cm away from Chrome tabs), wakes `reportLoop` immediately instead of waiting 2.5 s, removes the redundant 160 ms JS hover-out delay, lowers dwell/leave timers to 45 ms / 35 ms at 60 Hz cursor polling, and debounces WebView2 `LOW`-memory mode by 20 s so opening and closing are crisp and instantaneous with zero compositor stall.

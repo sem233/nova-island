@@ -481,13 +481,19 @@ pub fn handle(app: &Rc<RefCell<App>>, msg: Msg, src: Src) {
             app.borrow().clips.copy(arg0.as_str().unwrap_or(""));
             Value::Null
         }
-        // --- Windows Cache Cleaner & RAM Booster (1.8.16) ---
+        // --- Windows Cache Cleaner & RAM Booster (1.8.16 / 1.8.17 live-synced) ---
         "boost-stats" => {
             later(app, id, crate::boost::stats);
             return;
         }
         "boost-run" => {
-            later(app, id, crate::boost::run);
+            let bus = app.borrow().bus.clone();
+            let system = app.borrow().system.clone();
+            later(app, id, move || {
+                let res = crate::boost::run_with_progress(|ev| bus.event("boost-progress", ev));
+                system.wake_stats();
+                res
+            });
             return;
         }
         // --- Video Downloader (MDM) ---

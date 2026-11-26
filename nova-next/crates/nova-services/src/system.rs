@@ -273,6 +273,11 @@ impl System {
         }
     }
 
+    /// Triggers an immediate CPU / RAM stats push (e.g. right after RAM boost completes).
+    pub fn wake_stats(&self) {
+        self.stats_wake.wake();
+    }
+
     // ---- clipboard (configurable count up to 50 + expiry + optional disk persistence) ----
     fn persist_history(&self, clips: &[ClipEntry]) {
         if clip_persist_from(&self.ctx) {

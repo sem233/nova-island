@@ -702,7 +702,7 @@ const PATCHES: &[(&str, &str, &str)] = &[
     (
         "preload.js",
         "  shotPin: () => ipcRenderer.send('shot-pin'),\n",
-        "  shotPin: () => ipcRenderer.send('shot-pin'),\n  boostStats: () => ipcRenderer.invoke('boost-stats'),\n  boostRun: () => ipcRenderer.invoke('boost-run'),\n",
+        "  shotPin: () => ipcRenderer.send('shot-pin'),\n  boostStats: () => ipcRenderer.invoke('boost-stats'),\n  boostRun: () => ipcRenderer.invoke('boost-run'),\n  onBoostProgress: on('boost-progress'),\n",
     ),
     (
         "prefs/preload.js",
